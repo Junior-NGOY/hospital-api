@@ -1,5 +1,5 @@
 import express from "express";
-import customerRouter from "./routes/customer";
+import schoolRouter from "./routes/school";
 
 require("dotenv").config();
 const cors = require("cors");
@@ -14,4 +14,4 @@ app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`); // Log a message indicating the server is running
 });
 
-app.use("/api/v1", customerRouter);
+app.use("/api/v1", schoolRouter);
