@@ -1,117 +1,332 @@
 import { db } from "@/db/db";
-import {
-  TypedRequestBody,
-  UserCreateProps,
-  UserLoginProps
-} from "@/types/types";
 import { Request, Response } from "express";
+import { TypedRequestBody } from "@/types";
+import { Specialization, UserRole } from "@prisma/client";
 import bcrypt from "bcrypt";
-import {
-  generateAccessToken,
-  generateRefreshToken,
-  TokenPayload
-} from "@/utils/tokens";
 
-export async function createUser(
-  req: TypedRequestBody<UserCreateProps>,
-  res: Response
-) {
-  const data = req.body;
-  const { email, password, role, name, phone, image, schoolId, schoolName } =
-    data;
-  try {
-    // Check if the user already exists\
-    const existingEmail = await db.user.findUnique({
-      where: {
-        email
-      }
-    });
-
-    if (existingEmail) {
-      return res.status(409).json({
-        data: null,
-        error: "Email already exists"
-      });
-    }
-    //hash password
-    // Encrypt the Password =>bcrypt
-    const hashedPassword = await bcrypt.hash(password, 10);
-    data.password = hashedPassword;
-    const newUser = await db.user.create({
-      data
-    });
-    console.log(`User created successfully: ${newUser.name} (${newUser.id})`);
-    return res.status(201).json({
-      data: newUser,
-      error: null
-    });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({
-      data: null,
-      error: "Something went wrong"
-    });
-  }
+// Interface pour la création d'un utilisateur
+interface CreateUserProps {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  role: UserRole;
+  hospitalId?: string;
+  branchId?: string;
+  phone?: string;
+  isActive?: boolean;
+  // Champs spécifiques aux rôles
+  specialization?: Specialization; // Pour les médecins
+  licenseNumber?: string; // Pour le personnel médical
+  position?: string; // Pour les administrateurs
 }
-export async function loginUser(
-  req: TypedRequestBody<UserLoginProps>,
+
+/**
+ * Crée un nouvel utilisateur
+ */
+export async function createUser(
+  req: TypedRequestBody<CreateUserProps>,
   res: Response
 ) {
-  const data = req.body;
-  const { email, password } = data;
+  const {
+    email,
+    password,
+    firstName,
+    lastName,
+    role,
+    hospitalId,
+    branchId,
+    phone,
+    isActive = true,
+    specialization,
+    licenseNumber,
+    position
+  } = req.body;
+
   try {
-    // Check if the user already exists\
+    // Vérifier si l'email existe déjà
     const existingUser = await db.user.findUnique({
       where: {
         email
       }
     });
 
-    if (!existingUser) {
-      console.log("fuasse email");
+    if (existingUser) {
       return res.status(409).json({
         data: null,
-        error: "Invalid Credentials"
+        error: "Un utilisateur avec cet email existe déjà"
       });
     }
-    //Verify password
-    const isPasswordValid = await bcrypt.compare(
-      password,
-      existingUser.password
-    );
-    if (!isPasswordValid) {
-      console.log("pwd not good");
-      return res.status(401).json({ error: "Invalid Credentials", data: null });
-    } else {
-      console.log("pwd is ok");
+
+    // Vérifier si l'hôpital existe (si fourni)
+    if (hospitalId) {
+      const hospital = await db.hospital.findUnique({
+        where: {
+          id: hospitalId
+        }
+      });
+
+      if (!hospital) {
+        return res.status(404).json({
+          data: null,
+          error: "Hôpital non trouvé"
+        });
+      }
     }
-    // Generate Tokens
-    const tokenPayload: TokenPayload = {
-      userId: existingUser.id,
-      email: existingUser.email,
-      role: existingUser.role
-    };
 
-    const accessToken = generateAccessToken(tokenPayload);
-    const refreshToken = generateRefreshToken(tokenPayload);
+    // Vérifier si la branche existe (si fournie)
+    if (branchId) {
+      const branch = await db.hospitalBranch.findUnique({
+        where: {
+          id: branchId
+        }
+      });
 
-    // Store refresh token
-    await db.refreshToken.create({
+      if (!branch) {
+        return res.status(404).json({
+          data: null,
+          error: "Branche d'hôpital non trouvée"
+        });
+      }
+    }
+
+    // Vérifier les champs requis selon le rôle
+    if (role === "DOCTOR" && !specialization) {
+      return res.status(400).json({
+        data: null,
+        error: "La spécialisation est requise pour les médecins"
+      });
+    }    if ((role === "DOCTOR" || role === "NURSE" || role === "PHARMACIST") && !licenseNumber) {
+      return res.status(400).json({
+        data: null,
+        error: "Le numéro de licence est requis pour ce rôle"
+      });
+    }
+
+    if (role === "ADMINISTRATOR" && !position) {
+      return res.status(400).json({
+        data: null,
+        error: "La position est requise pour les administrateurs"
+      });
+    }
+
+    // Hacher le mot de passe
+   // const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = "1234";
+
+    // Créer l'utilisateur de base
+    const newUser = await db.user.create({
       data: {
-        token: refreshToken,
-        userId: existingUser.id,
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+        email,
+        password: hashedPassword,
+        firstName,
+        lastName,
+        role,
+        hospitalId,
+        branchId,
+        phone,
+        isActive
       }
     });
-    // Remove sensitive data
-    const { password: _, ...userWithoutPassword } = existingUser;
+
+    // Créer l'enregistrement spécifique au rôle
+    switch (role) {
+      case "DOCTOR":
+        await db.doctor.create({
+          data: {
+            userId: newUser.id,
+            licenseNumber: licenseNumber!,
+            specialization: specialization!
+          }
+        });
+        break;
+        
+      case "NURSE":
+        await db.nurse.create({
+          data: {
+            userId: newUser.id,
+            licenseNumber:licenseNumber!,
+          }
+        });
+        break;
+        
+      case "ADMINISTRATOR":
+        await db.administrator.create({
+          data: {
+            userId: newUser.id,
+            position : position!,
+          }
+        });
+        break;
+        
+      case "RECEPTIONIST":
+        await db.receptionist.create({
+          data: {
+            userId: newUser.id
+          }
+        });
+        break;
+          case "LAB_TECHNICIAN":
+        await db.labTechnician.create({
+          data: {
+            userId: newUser.id,
+            specialization: specialization // Optionnel selon le schéma
+          }
+        });
+        break;
+        
+      case "ACCOUNTANT":
+        await db.accountant.create({
+          data: {
+            userId: newUser.id
+          }
+        });
+        break;
+        
+      case "PHARMACIST":
+        await db.pharmacist.create({
+          data: {
+            userId: newUser.id,
+            licenseNumber: licenseNumber!,
+          }
+        });
+        break;
+    }
+
+    // Récupérer l'utilisateur créé avec ses informations de rôle
+    const createdUser = await db.user.findUnique({
+      where: {
+        id: newUser.id
+      },
+      include: {
+        doctor: role === "DOCTOR",
+        nurse: role === "NURSE",
+        administrator: role === "ADMINISTRATOR",
+        receptionist: role === "RECEPTIONIST",
+        labTechnician: role === "LAB_TECHNICIAN",
+        accountant: role === "ACCOUNTANT",
+        pharmacist: role === "PHARMACIST",
+        hospital: hospitalId ? {
+          select: {
+            id: true,
+            name: true
+          }
+        } : false,
+        branch: branchId ? {
+          select: {
+            id: true,
+            name: true
+          }
+        } : false
+      }
+    });
+
+    // Supprimer le mot de passe de la réponse
+    const { password: _, ...userWithoutPassword } = createdUser as any;
+
+    return res.status(201).json({
+      data: userWithoutPassword,
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la création de l'utilisateur"
+    });
+  }
+}
+
+/**
+ * Récupère tous les utilisateurs
+ */
+export async function getAllUsers(req: Request, res: Response) {
+  const { hospitalId, branchId, role, isActive, page = "1", limit = "10" } = req.query;
+  
+  const pageNumber = parseInt(page as string);
+  const limitNumber = parseInt(limit as string);
+  const skip = (pageNumber - 1) * limitNumber;
+
+  try {
+    // Construire les filtres
+    const where: any = {};
+    
+    if (hospitalId) where.hospitalId = hospitalId as string;
+    if (branchId) where.branchId = branchId as string;
+    if (role) where.role = role as UserRole;
+    if (isActive !== undefined) where.isActive = isActive === "true";
+
+    // Compter le nombre total d'utilisateurs correspondant aux filtres
+    const totalUsers = await db.user.count({ where });
+    
+    // Récupérer les utilisateurs avec pagination
+    const users = await db.user.findMany({
+      where,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        phone: true,
+        createdAt: true,
+        hospital: hospitalId ? {
+          select: {
+            id: true,
+            name: true
+          }
+        } : false,
+        branch: branchId ? {
+          select: {
+            id: true,
+            name: true
+          }
+        } : false,
+        doctor: {
+          select: {
+            specialization: true,
+            licenseNumber: true
+          }
+        },
+        nurse: {
+          select: {
+            licenseNumber: true,
+            specialization: true
+          }
+        },
+        administrator: {
+          select: {
+            position: true
+          }
+        },
+        pharmacist: {
+          select: {
+            licenseNumber: true
+          }
+        },
+        labTechnician: {
+          select: {
+            specialization: true
+          }
+        }
+      },
+      orderBy: {
+        lastName: "asc"
+      },
+      skip,
+      take: limitNumber
+    });
 
     return res.status(200).json({
       data: {
-        user: userWithoutPassword,
-        accessToken,
-        refreshToken,
-        password
+        users,
+        pagination: {
+          total: totalUsers,
+          page: pageNumber,
+          limit: limitNumber,
+          totalPages: Math.ceil(totalUsers / limitNumber)
+        }
       },
       error: null
     });
@@ -119,32 +334,871 @@ export async function loginUser(
     console.log(error);
     return res.status(500).json({
       data: null,
-      error: "Something went wrong"
+      error: "Une erreur est survenue lors de la récupération des utilisateurs"
     });
   }
 }
-export async function getUsers(req: Request, res: Response) {
+
+/**
+ * Récupère un utilisateur par son ID
+ */
+export async function getUserById(req: Request, res: Response) {
+  const { id } = req.params;
+
   try {
-    const users = await db.user.findMany({
-      orderBy: {
-        createdAt: "desc"
+    const user = await db.user.findUnique({
+      where: {
+        id
+      },
+      include: {
+        doctor: true,
+        nurse: true,
+        administrator: true,
+        receptionist: true,
+        labTechnician: true,
+        accountant: true,
+        pharmacist: true,
+        hospital: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        branch: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
       }
     });
-    return res.status(200).json(users);
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Supprimer le mot de passe de la réponse
+    const { password, ...userWithoutPassword } = user;
+
+    return res.status(200).json({
+      data: userWithoutPassword,
+      error: null
+    });
   } catch (error) {
     console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la récupération de l'utilisateur"
+    });
   }
 }
-// export async function getCustomerById(req: Request, res: Response) {
-//   const { id } = req.params;
-//   try {
-//     const customer = await db.customer.findUnique({
-//       where: {
-//         id,
-//       },
-//     });
-//     return res.status(200).json(customer);
-//   } catch (error) {
-//     console.log(error);
-//   }
-// }
+
+/**
+ * Met à jour un utilisateur
+ */
+export async function updateUser(req: Request, res: Response) {
+  const { id } = req.params;
+  const {
+    firstName,
+    lastName,
+    phone,
+    hospitalId,
+    branchId,
+    isActive,
+    specialization,
+    licenseNumber,
+    position
+  } = req.body;
+
+  try {
+    // Vérifier si l'utilisateur existe
+    const existingUser = await db.user.findUnique({
+      where: {
+        id
+      },
+      include: {
+        doctor: true,
+        nurse: true,
+        administrator: true,
+        labTechnician: true,
+        pharmacist: true
+      }
+    });
+
+    if (!existingUser) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Vérifier si l'hôpital existe (si fourni)
+    if (hospitalId) {
+      const hospital = await db.hospital.findUnique({
+        where: {
+          id: hospitalId
+        }
+      });
+
+      if (!hospital) {
+        return res.status(404).json({
+          data: null,
+          error: "Hôpital non trouvé"
+        });
+      }
+    }
+
+    // Vérifier si la branche existe (si fournie)
+    if (branchId) {
+      const branch = await db.hospitalBranch.findUnique({
+        where: {
+          id: branchId
+        }
+      });
+
+      if (!branch) {
+        return res.status(404).json({
+          data: null,
+          error: "Branche d'hôpital non trouvée"
+        });
+      }
+    }
+
+    // Mettre à jour l'utilisateur de base
+    const updatedUser = await db.user.update({
+      where: {
+        id
+      },
+      data: {
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
+        phone: phone || undefined,
+        hospitalId: hospitalId || undefined,
+        branchId: branchId || undefined,
+        isActive: isActive !== undefined ? isActive : undefined
+      },
+      include: {
+        doctor: true,
+        nurse: true,
+        administrator: true,
+        receptionist: true,
+        labTechnician: true,
+        accountant: true,
+        pharmacist: true,
+        hospital: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        branch: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
+
+    // Mettre à jour les informations spécifiques au rôle
+    switch (existingUser.role) {
+      case "DOCTOR":
+        if (existingUser.doctor && (specialization || licenseNumber)) {
+          await db.doctor.update({
+            where: {
+              userId: id
+            },
+            data: {
+              specialization: specialization || undefined,
+              licenseNumber: licenseNumber || undefined
+            }
+          });
+        }
+        break;
+        
+      case "NURSE":
+        if (existingUser.nurse && licenseNumber) {
+          await db.nurse.update({
+            where: {
+              userId: id
+            },
+            data: {
+              licenseNumber
+            }
+          });
+        }
+        break;
+        
+      case "ADMINISTRATOR":
+        if (existingUser.administrator && position) {
+          await db.administrator.update({
+            where: {
+              userId: id
+            },
+            data: {
+              position
+            }
+          });
+        }
+        break;
+        
+      case "LAB_TECHNICIAN":
+        if (existingUser.labTechnician && licenseNumber) {
+          await db.labTechnician.update({
+            where: {
+              userId: id
+            },
+            data: {
+              specialization: specialization!
+            }
+          });
+        }
+        break;
+        
+      case "PHARMACIST":
+        if (existingUser.pharmacist && licenseNumber) {
+          await db.pharmacist.update({
+            where: {
+              userId: id
+            },
+            data: {
+              licenseNumber
+            }
+          });
+        }
+        break;
+    }
+
+    // Supprimer le mot de passe de la réponse
+    const { password, ...userWithoutPassword } = updatedUser;
+
+    return res.status(200).json({
+      data: userWithoutPassword,
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la mise à jour de l'utilisateur"
+    });
+  }
+}
+
+/**
+ * Change le mot de passe d'un utilisateur
+ */
+export async function changePassword(req: Request, res: Response) {
+  const { id } = req.params;
+  const { currentPassword, newPassword } = req.body;
+
+  try {
+    // Vérifier si l'utilisateur existe
+    const user = await db.user.findUnique({
+      where: {
+        id
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Vérifier le mot de passe actuel
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        data: null,
+        error: "Mot de passe actuel incorrect"
+      });
+    }
+
+    // Hacher le nouveau mot de passe
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Mettre à jour le mot de passe
+    await db.user.update({
+      where: {
+        id
+      },
+      data: {
+        password: hashedPassword
+      }
+    });
+
+    return res.status(200).json({
+      data: { message: "Mot de passe modifié avec succès" },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors du changement de mot de passe"
+    });
+  }
+}
+
+/**
+ * Réinitialise le mot de passe d'un utilisateur (par un administrateur)
+ */
+export async function resetPassword(req: Request, res: Response) {
+  const { id } = req.params;
+  const { newPassword } = req.body;
+
+  try {
+    // Vérifier si l'utilisateur existe
+    const user = await db.user.findUnique({
+      where: {
+        id
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Hacher le nouveau mot de passe
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Mettre à jour le mot de passe
+    await db.user.update({
+      where: {
+        id
+      },
+      data: {
+        password: hashedPassword
+      }
+    });
+
+    return res.status(200).json({
+      data: { message: "Mot de passe réinitialisé avec succès" },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la réinitialisation du mot de passe"
+    });
+  }
+}
+
+/**
+ * Désactive un utilisateur
+ */
+export async function deactivateUser(req: Request, res: Response) {
+  const { id } = req.params;
+
+  try {
+    // Vérifier si l'utilisateur existe
+    const user = await db.user.findUnique({
+      where: {
+        id
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Désactiver l'utilisateur
+    const updatedUser = await db.user.update({
+      where: {
+        id
+      },
+      data: {
+        isActive: false
+      }
+    });
+
+    // Supprimer le mot de passe de la réponse
+    const { password, ...userWithoutPassword } = updatedUser;
+
+    return res.status(200).json({
+      data: userWithoutPassword,
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la désactivation de l'utilisateur"
+    });
+  }
+}
+
+/**
+ * Réactive un utilisateur
+ */
+export async function activateUser(req: Request, res: Response) {
+  const { id } = req.params;
+
+  try {
+    // Vérifier si l'utilisateur existe
+    const user = await db.user.findUnique({
+      where: {
+        id
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Réactiver l'utilisateur
+    const updatedUser = await db.user.update({
+      where: {
+        id
+      },
+      data: {
+        isActive: true
+      }
+    });
+
+    // Supprimer le mot de passe de la réponse
+    const { password, ...userWithoutPassword } = updatedUser;
+
+    return res.status(200).json({
+      data: userWithoutPassword,
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la réactivation de l'utilisateur"
+    });
+  }
+}
+
+/**
+ * Supprime un utilisateur
+ */
+export async function deleteUser(req: Request, res: Response) {
+  const { id } = req.params;
+
+  try {
+    // Vérifier si l'utilisateur existe
+    const user = await db.user.findUnique({
+      where: {
+        id
+      },
+      include: {
+        doctor: {
+          include: {
+            consultations: {
+              take: 1
+            },
+            surgeries: {
+              take: 1
+            }
+          }
+        },
+        nurse: {
+          include: {
+            vitalSigns: {
+              take: 1
+            },
+            medications: {
+              take: 1
+            }
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    // Vérifier si l'utilisateur a des données associées
+    if (
+      (user.doctor && (user.doctor.consultations.length > 0 || user.doctor.surgeries.length > 0)) ||
+      (user.nurse && (user.nurse.vitalSigns.length > 0 || user.nurse.medications.length > 0))
+    ) {
+      return res.status(400).json({
+        data: null,
+        error: "Impossible de supprimer cet utilisateur car il a des données associées. Désactivez-le plutôt."
+      });
+    }
+
+    // Supprimer les données spécifiques au rôle
+    switch (user.role) {
+      case "DOCTOR":
+        if (user.doctor) {
+          await db.doctor.delete({
+            where: {
+              userId: id
+            }
+          });
+        }
+        break;
+        
+      case "NURSE":
+        if (user.nurse) {
+          await db.nurse.delete({
+            where: {
+              userId: id
+            }
+          });
+        }
+        break;
+        
+      case "ADMINISTRATOR":
+        await db.administrator.delete({
+          where: {
+            userId: id
+          }
+        });
+        break;
+        
+      case "RECEPTIONIST":
+        await db.receptionist.delete({
+          where: {
+            userId: id
+          }
+        });
+        break;
+        
+      case "LAB_TECHNICIAN":
+        await db.labTechnician.delete({
+          where: {
+            userId: id
+          }
+        });
+        break;
+        
+      case "ACCOUNTANT":
+        await db.accountant.delete({
+          where: {
+            userId: id
+          }
+        });
+        break;
+        
+      case "PHARMACIST":
+        await db.pharmacist.delete({
+          where: {
+            userId: id
+          }
+        });
+        break;
+    }
+
+    // Supprimer l'utilisateur
+    await db.user.delete({
+      where: {
+        id
+      }
+    });
+
+    return res.status(200).json({
+      data: { id },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la suppression de l'utilisateur"
+    });
+  }
+}
+
+/**
+ * Récupère les utilisateurs par rôle
+ */
+export async function getUsersByRole(req: Request, res: Response) {
+  const { role } = req.params;
+  const { hospitalId, branchId, isActive, page = "1", limit = "10" } = req.query;
+  
+  const pageNumber = parseInt(page as string);
+  const limitNumber = parseInt(limit as string);
+  const skip = (pageNumber - 1) * limitNumber;
+
+  try {
+    // Vérifier si le rôle est valide
+    if (!Object.values(UserRole).includes(role as UserRole)) {
+      return res.status(400).json({
+        data: null,
+        error: "Rôle invalide"
+      });
+    }
+
+    // Construire les filtres
+    const where: any = { role: role as UserRole };
+    
+    if (hospitalId) where.hospitalId = hospitalId as string;
+    if (branchId) where.branchId = branchId as string;
+    if (isActive !== undefined) where.isActive = isActive === "true";
+
+    // Compter le nombre total d'utilisateurs correspondant aux filtres
+    const totalUsers = await db.user.count({ where });
+    
+    // Récupérer les utilisateurs avec pagination
+    const users = await db.user.findMany({
+      where,
+      include: {
+        doctor: role === "DOCTOR",
+        nurse: role === "NURSE",
+        administrator: role === "ADMINISTRATOR",
+        receptionist: role === "RECEPTIONIST",
+        labTechnician: role === "LAB_TECHNICIAN",
+        accountant: role === "ACCOUNTANT",
+        pharmacist: role === "PHARMACIST",
+        hospital: hospitalId ? {
+          select: {
+            id: true,
+            name: true
+          }
+        } : false,
+        branch: branchId ? {
+          select: {
+            id: true,
+            name: true
+          }
+        } : false
+      },
+      orderBy: {
+        lastName: "asc"
+      },
+      skip,
+      take: limitNumber
+    });
+
+    // Supprimer les mots de passe des réponses
+    const usersWithoutPasswords = users.map(user => {
+      const { password, ...userWithoutPassword } = user;
+      return userWithoutPassword;
+    });
+
+    return res.status(200).json({
+      data: {
+        users: usersWithoutPasswords,
+        pagination: {
+          total: totalUsers,
+          page: pageNumber,
+          limit: limitNumber,
+          totalPages: Math.ceil(totalUsers / limitNumber)
+        }
+      },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: `Une erreur est survenue lors de la récupération des utilisateurs avec le rôle ${role}`
+    });
+  }
+}
+
+/**
+ * Récupère les utilisateurs par hôpital
+ */
+export async function getUsersByHospital(req: Request, res: Response) {
+  const { hospitalId } = req.params;
+  const { role, isActive, page = "1", limit = "10" } = req.query;
+  
+  const pageNumber = parseInt(page as string);
+  const limitNumber = parseInt(limit as string);
+  const skip = (pageNumber - 1) * limitNumber;
+
+  try {
+    // Vérifier si l'hôpital existe
+    const hospital = await db.hospital.findUnique({
+      where: {
+        id: hospitalId
+      }
+    });
+
+    if (!hospital) {
+      return res.status(404).json({
+        data: null,
+        error: "Hôpital non trouvé"
+      });
+    }
+
+    // Construire les filtres
+    const where: any = { hospitalId };
+    
+    if (role) where.role = role as UserRole;
+    if (isActive !== undefined) where.isActive = isActive === "true";
+
+    // Compter le nombre total d'utilisateurs correspondant aux filtres
+    const totalUsers = await db.user.count({ where });
+    
+    // Récupérer les utilisateurs avec pagination
+    const users = await db.user.findMany({
+      where,
+      include: {
+        doctor: true,
+        nurse: true,
+        administrator: true,
+        receptionist: true,
+        labTechnician: true,
+        accountant: true,
+        pharmacist: true,
+        branch: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      },
+      orderBy: [
+        {
+          role: "asc"
+        },
+        {
+          lastName: "asc"
+        }
+      ],
+      skip,
+      take: limitNumber
+    });
+
+    // Supprimer les mots de passe des réponses
+    const usersWithoutPasswords = users.map(user => {
+      const { password, ...userWithoutPassword } = user;
+      return userWithoutPassword;
+    });
+
+    return res.status(200).json({
+      data: {
+        users: usersWithoutPasswords,
+        hospital: {
+          id: hospital.id,
+          name: hospital.name
+        },
+        pagination: {
+          total: totalUsers,
+          page: pageNumber,
+          limit: limitNumber,
+          totalPages: Math.ceil(totalUsers / limitNumber)
+        }
+      },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la récupération des utilisateurs de l'hôpital"
+    });
+  }
+}
+
+export async function getUsersByBranch(req: Request, res: Response) {
+  const { branchId } = req.params;
+  const { role, isActive, page = "1", limit = "10" } = req.query;
+  
+  const pageNumber = parseInt(page as string);
+  const limitNumber = parseInt(limit as string);
+  const skip = (pageNumber - 1) * limitNumber;
+
+  try {
+    // Vérifier si la branche existe
+    const branch = await db.hospitalBranch.findUnique({
+      where: {
+        id: branchId
+      }
+    });
+
+    if (!branch) {
+      return res.status(404).json({
+        data: null,
+        error: "Branche d'hôpital non trouvée"
+      });
+    }
+
+    // Construire les filtres
+    const where: any = { branchId };
+    
+    if (role) where.role = role as UserRole;
+    if (isActive !== undefined) where.isActive = isActive === "true";
+
+    // Compter le nombre total d'utilisateurs correspondant aux filtres
+    const totalUsers = await db.user.count({ where });
+    
+    // Récupérer les utilisateurs avec pagination
+    const users = await db.user.findMany({
+      where,
+      include: {
+        doctor: true,
+        nurse: true,
+        administrator: true,
+        receptionist: true,
+        labTechnician: true,
+        accountant: true,
+        pharmacist: true,
+        hospital: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      },
+      orderBy: [
+        {
+          role: "asc"
+        },
+        {
+          lastName: "asc"
+        }
+      ],
+      skip,
+      take: limitNumber
+    });
+
+    // Supprimer les mots de passe des réponses
+    const usersWithoutPasswords = users.map(user => {
+      const { password, ...userWithoutPassword } = user;
+      return userWithoutPassword;
+    });
+
+    return res.status(200).json({
+      data: {
+        users: usersWithoutPasswords,
+        branch: {
+          id: branch.id,
+          name: branch.name,
+          hospitalId: branch.hospitalId
+        },
+        pagination: {
+          total: totalUsers,
+          page: pageNumber,
+          limit: limitNumber,
+          totalPages: Math.ceil(totalUsers / limitNumber)
+        }
+      },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la récupération des utilisateurs de la branche"
+    });
+  }
+}

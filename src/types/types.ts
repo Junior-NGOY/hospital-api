@@ -1,10 +1,57 @@
-import { Gender, SubjectCategory, SubjectType, UserRole } from "@prisma/client";
+import { Gender, MaritalStatus, PatientCategory } from "@prisma/client";
 import { Request, Response } from "express";
 
 export interface TypedRequestBody<T> extends Request {
   body: T;
 }
-export type ContactProps = {
+export type PatientCreateProps = {
+  title: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  dateOfBirth: string; // Date of Birth
+  gender: Gender;
+  maritalStatut: MaritalStatus;
+  address: string;
+  phoneNumber: string;
+  emergencyContact?: string;
+  profession?: string;
+  regNo?: string;
+  admissionDate: string;
+  category: PatientCategory;
+};
+export type QueueItemCreateProps = {
+  id: string;
+  patientId: string;
+  arrivalTime: string;
+  //status?: Status;
+  patientName?: String;
+  patientFirstName?: String;
+  patientLastName?: String;
+  patientRegNo?: String;
+  patientGender?: String;
+  patientPhoneNumber?: String;
+};
+export type ConsultationCreateProps = {
+  id              :string,    
+  patientId      : string,
+  patient        : string,  
+/*   staffId           String
+  staff             Staff     @relation(fields: [staffId], references: [id])
+  hospitalId        String
+  hospital          Hospital  @relation(fields: [hospitalId], references: [id])
+  chiefComplaintId String?
+  chiefComplaint  Complaint? @relation(fields: [chiefComplaintId], references: [id])
+  otherComplaints String?
+  historyOfIllness String   // Histoire de la maladie
+  diagnosis       String
+  treatment       String
+  notes           String?
+  vitalSigns      VitalSigns[]
+  prescriptions   Prescription[] */
+}
+/* export type ContactProps = {
   fullName: string;
   email: string;
   phone: string;
@@ -16,11 +63,7 @@ export type ContactProps = {
   media: string;
   message: string;
 };
-export type ClassCreateProps = {
-  title: string;
-  slug: string;
-  schoolId: string;
-};
+
 export type departmentCreateProps = {
   name: string;
   slug: string;
@@ -52,33 +95,7 @@ export type ParentCreateProps = {
   schoolId: string;
   userId: string;
 };
-export type StudentCreateProps = {
-  name: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  parentId: string;
-  classId: string;
-  streamId: string;
-  parentName?: string;
-  classTitle?: string;
-  streamTitle?: string;
-  password: string;
-  imageUrl: string;
-  phone?: string;
-  state?: string;
-  BCN?: string; // Birth Certificate Number
-  nationality: string;
-  religion?: string;
-  gender: string;
-  dob: string;
-  rollNo?: string;
-  regNo?: string;
-  admissionDate: string;
-  address: string;
-  schoolId: string;
-  userId: string;
-};
+
 export type SubjectCreateProps = {
   name: string;
   slug: string;
@@ -134,3 +151,4 @@ export type UserLoginProps = {
   email: string;
   password: string;
 };
+ */

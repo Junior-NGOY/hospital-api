@@ -1,28 +1,31 @@
 {
   "name": "starter-ts",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
+  "main": "index.js",  "scripts": {
     "dev": "tsnd --respawn -r tsconfig-paths/register --pretty --transpile-only ./src/index.ts",
-    "build": "tsc && tsc-alias",
+    "build": "prisma generate && tsc && tsc-alias",
+    "vercel-build": "prisma generate && prisma db push && tsc && tsc-alias",
     "start": "node ./dist",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "seed": "ts-node prisma/seed.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@prisma/client": "^6.0.1",
+    "@faker-js/faker": "^9.6.0",
+    "@prisma/client": "^6.3.1",
     "@types/node": "^22.4.0",
     "i": "^0.3.7",
     "npm": "^10.9.2",
-    "prisma": "^6.0.1",
+    "prisma": "^6.3.1",
     "ts-node-dev": "^2.0.0",
     "tsc-alias": "^1.8.10",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@prisma/extension-accelerate": "^1.2.2",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",

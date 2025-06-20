@@ -1,0 +1,33 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const patients_1 = __importDefault(require("./routes/patients"));
+const queue_1 = __importDefault(require("./routes/queue"));
+const consultations_1 = __importDefault(require("./routes/consultations"));
+const hospitals_1 = __importDefault(require("./routes/hospitals"));
+const departments_1 = __importDefault(require("./routes/departments"));
+const chefcomplaints_1 = __importDefault(require("./routes/chefcomplaints"));
+const user_1 = __importDefault(require("./routes/user"));
+const medications_1 = __importDefault(require("./routes/medications"));
+const categories_1 = __importDefault(require("./routes/categories"));
+require("dotenv").config();
+const cors = require("cors");
+const app = (0, express_1.default)();
+app.use(cors());
+const PORT = process.env.PORT || 8000;
+app.use(express_1.default.json());
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+});
+app.use("/api/v1", hospitals_1.default);
+app.use("/api/v1", consultations_1.default);
+app.use("/api/v1", queue_1.default);
+app.use("/api/v1", patients_1.default);
+app.use("/api/v1", departments_1.default);
+app.use("/api/v1", chefcomplaints_1.default);
+app.use("/api/v1", medications_1.default);
+app.use("/api/v1", categories_1.default);
+app.use("/api/v1", user_1.default);

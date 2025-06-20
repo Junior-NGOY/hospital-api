@@ -1,0 +1,555 @@
+/* generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Médecin (utilisateur principal)
+model Doctor {
+  id                String          @id @default(uuid())
+  email             String          @unique
+  password          String
+  firstName         String
+  lastName          String
+  phone             String?
+  specialization    Specialization
+  licenseNumber     String          @unique
+  biography         String?
+  profileImage      String?
+  website           String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  hospitalAffiliations DoctorHospital[]
+  patients          PatientDoctor[]
+  appointments      Appointment[]
+  consultations     Consultation[]
+  prescriptions     Prescription[]
+  medicalNotes      MedicalNote[]
+  researchProjects  ResearchProject[]
+  publications      Publication[]
+  sharedCases       SharedCase[]
+  clinicalExaminations ClinicalExamination[]
+  paraclinicalExams   ParaclinicalExam[]
+}
+
+enum Specialization {
+  CARDIOLOGY
+  DERMATOLOGY
+  ENDOCRINOLOGY
+  GASTROENTEROLOGY
+  NEUROLOGY
+  OBSTETRICS_GYNECOLOGY
+  ONCOLOGY
+  OPHTHALMOLOGY
+  ORTHOPEDICS
+  PEDIATRICS
+  PSYCHIATRY
+  PULMONOLOGY
+  RADIOLOGY
+  SURGERY
+  UROLOGY
+  OTHER
+}
+
+// Hôpitaux où le médecin travaille
+model Hospital {
+  id                String          @id @default(uuid())
+  name              String
+  address           String
+  city              String
+  state             String?
+  country           String
+  postalCode        String?
+  phone             String?
+  email             String?
+  website           String?
+  type              HospitalType
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  doctorAffiliations DoctorHospital[]
+  appointments      Appointment[]
+  consultations     Consultation[]
+}
+
+enum HospitalType {
+  PUBLIC
+  PRIVATE
+  UNIVERSITY
+  CLINIC
+  SPECIALIZED
+  OTHER
+}
+
+// Relation médecin-hôpital
+model DoctorHospital {
+  id                String          @id @default(uuid())
+  doctorId          String
+  hospitalId        String
+  startDate         DateTime
+  endDate           DateTime?
+  position          String?
+  schedule          Json?           // Format: {"monday": ["9:00-12:00", "14:00-17:00"], ...}
+  roomNumber        String?
+  isActive          Boolean         @default(true)
+  
+  doctor            Doctor          @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  hospital          Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  
+  @@unique([doctorId, hospitalId])
+}
+
+// Patients
+model Patient {
+  id                String          @id @default(uuid())
+  fileNumber        String          @unique
+  firstName         String
+  lastName          String
+  dateOfBirth       DateTime
+  gender            Gender
+  address           String?
+  phone             String?
+  email             String?
+  bloodType         BloodType?
+  emergencyContact  String?
+  insuranceInfo     String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  doctors           PatientDoctor[]
+  appointments      Appointment[]
+  consultations     Consultation[]
+  prescriptions     Prescription[]
+  medicalNotes      MedicalNote[]
+  labTests          LabTest[]
+  sharedCases       SharedCase[]
+  clinicalExaminations ClinicalExamination[]
+  paraclinicalExams   ParaclinicalExam[]
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum BloodType {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+  UNKNOWN
+}
+
+// Relation médecin-patient
+model PatientDoctor {
+  id                String          @id @default(uuid())
+  patientId         String
+  doctorId          String
+  startDate         DateTime        @default(now())
+  endDate           DateTime?
+  referredBy        String?
+  notes             String?
+  
+  patient           Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor            Doctor          @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  
+  @@unique([patientId, doctorId])
+}
+
+// Rendez-vous
+model Appointment {
+  id                String              @id @default(uuid())
+  patientId         String
+  doctorId          String
+  hospitalId        String
+  scheduledDate     DateTime
+  endTime           DateTime
+  status            AppointmentStatus   @default(SCHEDULED)
+  type              AppointmentType     @default(CONSULTATION)
+  reason            String?
+  notes             String?
+  reminderSent      Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  patient           Patient             @relation(fields: [patientId], references: [id])
+  doctor            Doctor              @relation(fields: [doctorId], references: [id])
+  hospital          Hospital            @relation(fields: [hospitalId], references: [id])
+  consultation      Consultation?
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  CONSULTATION
+  FOLLOW_UP
+  PROCEDURE
+  SURGERY
+  EMERGENCY
+  TELEHEALTH
+}
+
+// Consultations
+model Consultation {
+  id                String          @id @default(uuid())
+  patientId         String
+  doctorId          String
+  hospitalId        String
+  appointmentId     String?         @unique
+  date              DateTime        @default(now())
+  chiefComplaint    String
+  symptoms          String?
+  diagnosis         String[]
+  icdCodes          String[]
+  treatmentPlan     String?
+  followUpNeeded    Boolean         @default(false)
+  followUpDate      DateTime?
+  isShared          Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+  hospital          Hospital        @relation(fields: [hospitalId], references: [id])
+  appointment       Appointment?    @relation(fields: [appointmentId], references: [id])
+  prescriptions     Prescription[]
+  labTests          LabTest[]
+  medicalNotes      MedicalNote[]
+  sharedCase        SharedCase?
+  
+  // Nouvelles relations
+  clinicalExaminations ClinicalExamination[]
+  paraclinicalExams   ParaclinicalExam[]
+}
+
+// Prescriptions
+model Prescription {
+  id                String          @id @default(uuid())
+  patientId         String
+  doctorId          String
+  consultationId    String?
+  date              DateTime        @default(now())
+  medications       Json[]          // Format: [{"name": "Med1", "dosage": "10mg", "frequency": "twice daily", "duration": "7 days"}]
+  notes             String?
+  
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+  consultation      Consultation?   @relation(fields: [consultationId], references: [id])
+}
+
+// Notes médicales
+model MedicalNote {
+  id                String          @id @default(uuid())
+  patientId         String
+  doctorId          String
+  consultationId    String?
+  title             String
+  content           String
+  tags              String[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+  consultation      Consultation?   @relation(fields: [consultationId], references: [id])
+}
+
+// Tests de laboratoire
+model LabTest {
+  id                String          @id @default(uuid())
+  patientId         String
+  consultationId    String?
+  testType          String
+  requestedAt       DateTime        @default(now())
+  completedAt       DateTime?
+  results           Json?           // Format: {"parameter1": "value1", "parameter2": "value2"}
+  normalRanges      Json?           // Format: {"parameter1": "range1", "parameter2": "range2"}
+  interpretation    String?
+  attachmentUrls    String[]
+  
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  consultation      Consultation?   @relation(fields: [consultationId], references: [id])
+}
+
+// Projets de recherche
+model ResearchProject {
+  id                String          @id @default(uuid())
+  doctorId          String
+  title             String
+  description       String
+  startDate         DateTime
+  endDate           DateTime?
+  status            ProjectStatus   @default(ONGOING)
+  collaborators     String[]
+  institutions      String[]
+  fundingSources    String[]
+  ethicsApproval    Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+  publications      Publication[]
+}
+
+enum ProjectStatus {
+  PLANNED
+  ONGOING
+  COMPLETED
+  PUBLISHED
+  SUSPENDED
+}
+
+// Publications scientifiques
+model Publication {
+  id                String          @id @default(uuid())
+  doctorId          String
+  projectId         String?
+  title             String
+  abstract          String
+  authors           String[]
+  journal           String?
+  publicationDate   DateTime?
+  doi               String?         // Digital Object Identifier
+  url               String?
+  citationCount     Int             @default(0)
+  keywords          String[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+  project           ResearchProject? @relation(fields: [projectId], references: [id])
+}
+
+// Cas partagés (anonymisés)
+model SharedCase {
+  id                String          @id @default(uuid())
+  doctorId          String
+  patientId         String
+  consultationId    String          @unique
+  title             String
+  description       String
+  diagnosis         String[]
+  treatments        String[]
+  outcomes          String?
+  learningPoints    String?
+  isAnonymized      Boolean         @default(true)
+  tags              String[]
+  specialties       String[]
+  viewCount         Int             @default(0)
+  likeCount         Int             @default(0)
+  commentCount      Int             @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  consultation      Consultation    @relation(fields: [consultationId], references: [id])
+  comments          CaseComment[]
+}
+
+// Commentaires sur les cas partagés
+model CaseComment {
+  id                String          @id @default(uuid())
+  sharedCaseId      String
+  authorName        String
+  authorTitle       String?
+  authorInstitution String?
+  content           String
+  createdAt         DateTime        @default(now())
+  
+  sharedCase        SharedCase      @relation(fields: [sharedCaseId], references: [id], onDelete: Cascade)
+}
+
+// Statistiques
+model Statistics {
+  id                String          @id @default(uuid())
+  period            String          // "daily", "weekly", "monthly", "yearly"
+  date              DateTime
+  data              Json            // Format: {"consultations": 10, "newPatients": 2, "diagnoses": {"condition1": 5, "condition2": 3}}
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+// Paramètres de l'application
+model AppSettings {
+  id                String          @id @default(uuid())
+  doctorId          String          @unique
+  theme             String          @default("light")
+  language          String          @default("en")
+  notificationsEnabled Boolean      @default(true)
+  dataSharing       DataSharingLevel @default(ANONYMOUS)
+  autoBackup        Boolean         @default(true)
+  twoFactorAuth     Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+enum DataSharingLevel {
+  NONE
+  ANONYMOUS
+  PARTIAL
+  FULL
+}
+
+// Examens cliniques
+model ClinicalExamination {
+  id                String          @id @default(uuid())
+  consultationId    String
+  patientId         String
+  doctorId          String
+  date              DateTime        @default(now())
+  
+  // Systèmes examinés
+  generalAppearance String?
+  vitalSigns        Json?           // {"temperature": 37.2, "heartRate": 72, "bloodPressure": "120/80", "respiratoryRate": 16, "oxygenSaturation": 98}
+  heent             String?         // Head, Eyes, Ears, Nose, Throat
+  cardiovascular    String?
+  respiratory       String?
+  gastrointestinal  String?
+  genitourinary     String?
+  musculoskeletal   String?
+  neurological      String?
+  skin              String?
+  psychiatric       String?
+  endocrine         String?
+  lymphatic         String?
+  
+  findings          Json[]          // [{"system": "cardiovascular", "finding": "normal heart sounds", "severity": "normal"}]
+  conclusion        String?
+  
+  consultation      Consultation    @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  doctor            Doctor          @relation(fields: [doctorId], references: [id])
+}
+
+
+// Examens paracliniques (corrigé)
+model ParaclinicalExam {
+  id                String              @id @default(uuid())
+  consultationId    String
+  patientId         String
+  doctorId          String
+  
+  examType          ParaclinicalType
+  status            ExamStatus          @default(REQUESTED)
+  priority          ExamPriority        @default(ROUTINE)
+  
+  requestedAt       DateTime            @default(now())
+  scheduledAt       DateTime?
+  performedAt       DateTime?           // Date et heure de réalisation de l'examen
+  reportedAt        DateTime?
+  
+  requestReason     String?
+  clinicalContext   String?
+  instructions      String?
+  
+  performedBy       String?             // Nom du professionnel ou du laboratoire
+  locationPerformed String?             // Lieu de réalisation (renommé pour éviter le doublon)
+  
+  results           Json?               // Résultats structurés selon le type d'examen
+  reportUrl         String?             // Lien vers le rapport complet
+  imageUrls         String[]            // Liens vers les images
+  
+  interpretation    String?
+  conclusion        String?
+  recommendations   String?
+  
+  consultation      Consultation        @relation(fields: [consultationId], references: [id])
+  patient           Patient             @relation(fields: [patientId], references: [id])
+  doctor            Doctor              @relation(fields: [doctorId], references: [id])
+}
+
+enum ParaclinicalType {
+  // Imagerie
+  XRAY
+  CT_SCAN
+  MRI
+  ULTRASOUND
+  MAMMOGRAPHY
+  DEXA_SCAN
+  PET_SCAN
+  ANGIOGRAPHY
+  
+  // Analyses biologiques
+  BLOOD_COUNT
+  BIOCHEMISTRY
+  COAGULATION
+  HORMONES
+  SEROLOGY
+  IMMUNOLOGY
+  MICROBIOLOGY
+  TOXICOLOGY
+  GENETICS
+  
+  // Explorations fonctionnelles
+  ECG
+  ECHOCARDIOGRAPHY
+  STRESS_TEST
+  HOLTER_MONITORING
+  EEG
+  EMG
+  PULMONARY_FUNCTION
+  ENDOSCOPY
+  COLONOSCOPY
+  
+  // Autres
+  BIOPSY
+  CYTOLOGY
+  ANATOMIC_PATHOLOGY
+  OTHER
+}
+
+enum ExamStatus {
+  REQUESTED
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  RESULTS_AVAILABLE
+  RESULTS_REVIEWED
+}
+
+enum ExamPriority {
+  EMERGENCY
+  URGENT
+  ROUTINE
+  FOLLOW_UP
+}
+
+ 
+
+
+/* // Modifiez également les modèles Patient et Doctor pour inclure ces relations
+model Patient {
+  // ... champs existants
+  
+  // Ajoutez ces relations
+  clinicalExaminations ClinicalExamination[]
+  paraclinicalExams   ParaclinicalExam[]
+}
+
+model Doctor {
+  // ... champs existants
+  
+  // Ajoutez ces relations
+  clinicalExaminations ClinicalExamination[]
+  paraclinicalExams   ParaclinicalExam[]
+} */ 

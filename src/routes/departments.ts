@@ -1,14 +1,13 @@
+import { createDepartment, getDepartments } from "@/controllers/departments";
 import {
-  createDepartment,
-  getBriefDepartments,
-  getDepartments
-} from "@/controllers/departments";
+
+} from "@/controllers/nurses";
 import express from "express";
 const departmentRouter = express.Router();
 
 departmentRouter.post("/departments", createDepartment);
 departmentRouter.get("/departments", getDepartments);
-departmentRouter.get("/departments/brief", getBriefDepartments);
+//departmentRouter.get("/departments/brief", getBriefDepartments);
 //departmentRouter.post("/streams", createStream);
 //departmentRouter.get("/streams", getStreams);
 // adminRouter.get("/customers/:id", getCustomerById);

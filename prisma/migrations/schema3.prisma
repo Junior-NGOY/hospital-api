@@ -1,0 +1,704 @@
+/* // This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Hospital {
+  id               String            @id @default(cuid())
+  name             String
+  address          String
+  phoneNumber      String
+  email            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  departments      Department[]
+  staffSchedules   StaffSchedule[]
+  appointments     Appointment[]
+  consultations    Consultation[]
+  rooms            Room[]
+  incomes          Income[]
+  expenses         Expense[]
+  consultationFees ConsultationFee[]
+
+  //receptions      Reception[]
+  @@map("hospitals")
+}
+
+model Patient {
+  id               String          @id @default(cuid())
+  title            String
+  name             String
+  firstName        String
+  lastName         String
+  dateOfBirth      String
+  gender           Gender
+  maritalStatus    MaritalStatus
+  address          String
+  phoneNumber      String
+  email            String?
+  emergencyContact String?
+  profession       String?
+  category         PatientCategory
+  nationality      String?
+  regNo            String?         @unique
+  admissionDate    String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  queues           QueueItem[]
+  appointments     Appointment[]
+  consultations    Consultation[]
+  //medicalConditions PatientMedicalCondition[]
+  payments         Income[]
+
+  //receptions      Reception[]
+  @@map("patients")
+}
+
+model QueueItem {
+  id                 String   @id @default(cuid())
+  patientId          String
+  patient            Patient  @relation(fields: [patientId], references: [id])
+  arrivalTime        String
+  status             Status
+  patientName        String?
+  patientFirstName   String?
+  patientLastName    String?
+  patientRegNo       String?
+  patientGender      String?
+  patientPhoneNumber String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("queueItems")
+}
+
+enum Status {
+  WAITING
+  IN_CONSULTATION
+  COMPLETED
+}
+
+enum MaritalStatus {
+  MARRIED
+  SINGLE
+  DIVORCED
+  WIDOWED
+}
+
+enum PatientCategory {
+  SUBSCRIBER
+  INDIVIDUAL
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+/**
+ * model Reception {
+ * id              String    @id @default(cuid())
+ * patientId       String
+ * patient         Patient   @relation(fields: [patientId], references: [id])
+ * hospitalId      String
+ * hospital        Hospital  @relation(fields: [hospitalId], references: [id])
+ * receptionistId  String
+ * receptionist    Staff     @relation(fields: [receptionistId], references: [id])
+ * dateTime        DateTime
+ * notes           String?
+ * createdAt       DateTime  @default(now())
+ * updatedAt       DateTime  @updatedAt
+ * @@map("receptions")
+ * }
+ */
+
+/**
+ * model PatientMedicalCondition {
+ * id              String    @id @default(cuid())
+ * patientId       String
+ * patient         Patient   @relation(fields: [patientId], references: [id])
+ * medicalConditionId String
+ * medicalCondition MedicalCondition @relation(fields: [medicalConditionId], references: [id])
+ * diagnosedDate   DateTime
+ * notes           String?
+ * createdAt       DateTime  @default(now())
+ * updatedAt       DateTime  @updatedAt
+ * @@map("patientMedicalConditions")
+ * }
+ */
+
+/**
+ * model MedicalCondition {
+ * id              String    @id @default(cuid())
+ * name            String    @unique
+ * description     String?
+ * createdAt       DateTime  @default(now())
+ * updatedAt       DateTime  @updatedAt
+ * patients        PatientMedicalCondition[]
+ * @@map("medicalConditions")
+ * }
+ */
+
+/* model VitalSigns {
+  id               String        @id @default(cuid())
+  consultationId   String?       @unique
+  consultation     Consultation? @relation(fields: [consultationId], references: [id])
+  wardRoundId      String?       @unique
+  wardRound        WardRound?    @relation(fields: [wardRoundId], references: [id])
+  staffId          String
+  staff            Staff         @relation(fields: [staffId], references: [id])
+  temperature      Float? // en °C
+  respirationRate  Int? // respirations par minute
+  oxygenSaturation Float? // en pourcentage
+  bloodType        String?
+  height           Float? // en cm
+  weight           Float? // en kg
+  allergies        String?
+  glycemia         Float?
+  cholesterol      Float?
+  pa               Float? // Pression artérielle
+  pas              Float? // Pression artérielle systolique
+  pad              Float? // Pression artérielle diastolique
+  pulse            Int? // Pouls
+  fc               Int? // Fréquence cardiaque
+  fr               Int? // Fréquence respiratoire
+  diuresis         Float? // Diurèse
+  spo2             Float? // Saturation en oxygène
+  ta               String? // Tension artérielle
+  ddr              String? // Date des dernières règles
+  dpa              String? // Date prévue d'accouchement
+  pc               Float? // Périmètre crânien
+  imc              Float? // Indice de masse corporelle
+  generalSigns     String? // Signes généraux
+  notes            String?
+  recordedAt       DateTime      @default(now())
+
+  @@map("vitalSigns")
+}
+
+model GeneralSigns {
+  id             String        @id @default(cuid())
+  fever          Boolean       @default(false) // Fièvre
+  chills         Boolean       @default(false) // Frissons
+  paleness       Boolean       @default(false) // Pâleur
+  weightLoss     Boolean       @default(false) // Amaigrissement
+  deterioration  Boolean       @default(false) // Altération de l'état général
+  description    String? // Description supplémentaire
+  consultationId String?       @unique
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+  wardRoundId    String?       @unique
+  wardRound      WardRound?    @relation(fields: [wardRoundId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@map("generalSigns")
+}
+
+//tour de salle 
+model WardRound {
+  id                String          @id @default(cuid())
+  hospitalizationId String
+  hospitalization   Hospitalization @relation(fields: [hospitalizationId], references: [id])
+  staffId           String
+  staff             Staff           @relation(fields: [staffId], references: [id])
+  dateTime          DateTime
+  notes             String?
+  observations      String?
+  vitalSigns        VitalSigns?
+  generalSigns      GeneralSigns?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@map("wardRounds")
+}
+
+model Staff {
+  id             String            @id @default(cuid())
+  firstName      String
+  lastName       String
+  role           StaffRole
+  specialization String?
+  email          String            @unique
+  phoneNumber    String
+  //Contact information
+  address        String?
+  nationality    String
+  experience     Int?
+  //Document
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  documents      StaffDocument[]
+  schedules      StaffSchedule[]
+  appointments   Appointment[]
+  consultations  Consultation[]
+  // observations    Observation[]
+  // receptions      Reception[]
+  wardRounds     WardRound[]
+  vitalSigns     VitalSigns[]
+  attendance     StaffAttendance[]
+
+  @@map("staffs")
+}
+
+model StaffDocument {
+  id         String       @id @default(cuid())
+  staffId    String
+  staff      Staff        @relation(fields: [staffId], references: [id])
+  type       DocumentType
+  title      String
+  url        String
+  uploadedAt DateTime     @default(now())
+
+  @@index([staffId])
+  @@map("staffDocuments")
+}
+
+enum DocumentType {
+  RESUME
+  CERTIFICATE
+  ID_PROOF
+  QUALIFICATION
+  CONTRACT
+  OTHER
+}
+
+enum StaffRole {
+  DOCTOR
+  NURSE
+  ADMIN
+  RECEPTIONIST
+  TECHNICIAN
+  OTHER
+}
+
+model StaffSchedule {
+  id         String   @id @default(cuid())
+  staffId    String
+  staff      Staff    @relation(fields: [staffId], references: [id])
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id])
+  dayOfWeek  Int // 0 = Sunday, 1 = Monday, etc.
+  startTime  DateTime
+  endTime    DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("staffSchedules")
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  hospitalId  String
+  hospital    Hospital @relation(fields: [hospitalId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("departments")
+}
+
+model Appointment {
+  id                String          @id @default(cuid())
+  patientId         String
+  patient           Patient         @relation(fields: [patientId], references: [id])
+  staffId           String
+  staff             Staff           @relation(fields: [staffId], references: [id])
+  hospitalId        String
+  hospital          Hospital        @relation(fields: [hospitalId], references: [id])
+  consultationFeeId String
+  consultationFee   ConsultationFee @relation(fields: [consultationFeeId], references: [id])
+  dateTime          DateTime
+  reason            String
+  status            String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@map("appointments")
+}
+
+model Consultation {
+  id               String                    @id @default(cuid())
+  patientId        String
+  patient          Patient                   @relation(fields: [patientId], references: [id])
+  staffId          String
+  staff            Staff                     @relation(fields: [staffId], references: [id])
+  hospitalId       String
+  hospital         Hospital                  @relation(fields: [hospitalId], references: [id])
+  chiefComplaintId String
+  chiefComplaint   Complaint                 @relation(fields: [chiefComplaintId], references: [id])
+  otherComplaints  String?
+  antecedents      String? // Antécédents
+  historyOfIllness String // Histoire de la maladie
+  ca               String? // Complément d'anamnèse
+  examinations     ConsultationExamination[]
+  treatment        String
+  notes            String?
+  vitalSigns       VitalSigns?
+  generalSigns     GeneralSigns?
+  prescriptions    Prescription[]
+  hospitalization  Hospitalization?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@map("consultations")
+}
+
+// Table de liaison entre Consultation et Examination
+model ConsultationExamination {
+  id             String            @id @default(cuid())
+  consultationId String
+  consultation   Consultation      @relation(fields: [consultationId], references: [id])
+  examinationId  String
+  examination    Examination       @relation(fields: [examinationId], references: [id])
+  requestedAt    DateTime          @default(now())
+  status         ExaminationStatus @default(REQUESTED)
+  notes          String?
+  result         String?
+  resultDate     DateTime?
+
+  @@unique([consultationId, examinationId])
+  @@map("consultationExaminations")
+}
+
+model Examination {
+  id            String                    @id @default(cuid())
+  name          String
+  type          ExaminationType
+  description   String?
+  category      ExaminationCategory? // Pour regrouper les examens similaires
+  bodyPart      BodyPart?
+  consultations ConsultationExamination[]
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  @@map("examinations")
+}
+
+// Modèle pour les types d'examen
+enum ExaminationType {
+  CLINICAL
+  PARACLINICAL
+} */
+
+/**
+ * model ParaclinicalExamination {
+ * id              String    @id @default(cuid())
+ * consultationId   String
+ * consultation     Consultation @relation(fields: [consultationId], references: [id])
+ * testId          String
+ * test            ParaclinicalTest @relation(fields: [testId], references: [id])
+ * status          ExaminationStatus @default(REQUESTED)
+ * result          String?
+ * resultDate      DateTime?
+ * notes           String?
+ * createdAt       DateTime  @default(now())
+ * updatedAt       DateTime  @updatedAt
+ * @@map("paraclinicalExaminations")
+ * }
+ * // Modèle pour les examens paracliniques disponibles
+ * model ParaclinicalTest {
+ * id          String    @id @default(cuid())
+ * name        String    // "Sang", "Bandelette urinaire", etc.
+ * category    String    // Catégorie de l'examen
+ * description String?
+ * createdAt   DateTime  @default(now())
+ * updatedAt   DateTime  @updatedAt
+ * // Relations
+ * examinations ParaclinicalExamination[]
+ * @@map("paraclinicalTests")
+ * }
+ */
+// Modèle pour les constatations spécifiques d'un examen clinique
+/**
+ * model ExaminationFinding {
+ * id              String    @id @default(cuid())
+ * examinationId   String
+ * examination     Examination @relation(fields: [examinationId], references: [id])
+ * findingId       String
+ * finding         ClinicalFinding @relation(fields: [findingId], references: [id])
+ * value           String?    // Valeur ou observation spécifique
+ * notes           String?
+ * createdAt       DateTime  @default(now())
+ * updatedAt       DateTime  @updatedAt
+ * @@map("examinationFindings")
+ * }
+ */
+// Modèle pour les constatations cliniques possibles
+/**
+ * model ClinicalFinding {
+ * id          String    @id @default(cuid())
+ * name        String    // "Cheveux coloreux et non cassant", "Symetrique", etc.
+ * bodyPartId  String
+ * bodyPart    BodyPart
+ * description String?
+ * createdAt   DateTime  @default(now())
+ * updatedAt   DateTime  @updatedAt
+ * // Relations
+ * consultations Consultation[]
+ * //examinationFindings Examination[]
+ * //examinationFindings ExaminationFinding[]
+ * @@map("clinicalFindings")
+ * }
+ */
+// Modèle pour les parties du corps (uniquement pour examen clinique)
+/* enum BodyPart {
+  TETE_ET_COU
+  THORAX
+  ABDOMEN
+  MEMBRES_SUPERIEURS
+  MEMBRES_INFERIEURS
+  TOUCHER_RECTAL
+  TOUCHER_VAGINAL
+  CONCLUSION
+} */
+
+/**
+ * model BodyPart {
+ * id          String    @id @default(cuid())
+ * name        String    // "Tête et cou", "Thorax", "Abdomen", etc.
+ * description String?
+ * createdAt   DateTime  @default(now())
+ * updatedAt   DateTime  @updatedAt
+ * // Relations
+ * findings    ClinicalFinding[]
+ * @@map("bodyParts")
+ * }
+ */
+/* model Complaint {
+  id            String         @id @default(cuid())
+  description   String
+  slug          String         @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  consultations Consultation[]
+
+  @@map("complaints")
+}
+
+model Prescription {
+  id                String             @id @default(cuid())
+  medicalRecordId   String
+  consultation      Consultation       @relation(fields: [medicalRecordId], references: [id])
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  prescriptionItems PrescriptionItem[]
+
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id             String       @id @default(cuid())
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id])
+  medicationId   String
+  medication     Medication   @relation(fields: [medicationId], references: [id])
+  quantity       Int
+  dosage         String // ex: "1 comprimé 3 fois par jour"
+  duration       String // ex: "7 jours"
+  instructions   String? // Instructions supplémentaires
+
+  @@map("prescriptionItems")
+}
+
+model Medication {
+  id                String             @id @default(cuid())
+  name              String
+  description       String?
+  categoryId        String
+  category          MedicationCategory @relation(fields: [categoryId], references: [id])
+  type              MedicationType
+  manufacturer      String
+  inStock           Int
+  alertThreshold    Int
+  expirationDate    DateTime
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  prescriptionItems PrescriptionItem[]
+
+  @@map("medications")
+}
+
+enum MedicationType {
+  SPECIALTY
+  GENERIC
+}
+
+model MedicationCategory {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  medications Medication[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@map("medicationCategories")
+}
+
+model Room {
+  id               String            @id @default(cuid())
+  number           String
+  type             String
+  status           String
+  capacity         Int
+  hospitalId       String
+  hospital         Hospital          @relation(fields: [hospitalId], references: [id])
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  hospitalizations Hospitalization[]
+
+  @@unique([number, hospitalId])
+  @@map("rooms")
+}
+
+model Equipment {
+  id              String    @id @default(cuid())
+  name            String
+  type            String
+  status          String
+  lastMaintenance DateTime?
+  nextMaintenance DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("equipments")
+}
+
+model Hospitalization {
+  id             String       @id @default(cuid())
+  roomId         String
+  room           Room         @relation(fields: [roomId], references: [id])
+  consultationId String       @unique
+  consultation   Consultation @relation(fields: [consultationId], references: [id])
+  admissionDate  DateTime
+  dischargeDate  DateTime?
+  reason         String
+  status         String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  wardRounds     WardRound[]
+
+  @@map("hospitalizations")
+}
+
+model Income {
+  id          String     @id @default(cuid())
+  hospitalId  String
+  hospital    Hospital   @relation(fields: [hospitalId], references: [id])
+  patientId   String?
+  patient     Patient?   @relation(fields: [patientId], references: [id])
+  amount      Float
+  type        IncomeType
+  description String
+  date        DateTime
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("incomes")
+}
+
+enum IncomeType {
+  PATIENT_PAYMENT
+  EXTERNAL_FUNDING
+  DONATION
+  OTHER
+}
+
+model Expense {
+  id          String      @id @default(cuid())
+  hospitalId  String
+  hospital    Hospital    @relation(fields: [hospitalId], references: [id])
+  amount      Float
+  type        ExpenseType
+  description String
+  date        DateTime
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("expenses")
+}
+
+enum ExpenseType {
+  SALARY
+  UTILITY
+  EQUIPMENT
+  MEDICATION
+  MAINTENANCE
+  TAX
+  OTHER
+}
+
+model ConsultationFee {
+  id           String        @id @default(cuid())
+  hospitalId   String
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id])
+  name         String
+  description  String?
+  amount       Float
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+
+  @@map("consultation_fees")
+}
+
+model StaffAttendance {
+  id       String           @id @default(cuid())
+  staff    Staff            @relation(fields: [staffId], references: [id])
+  staffId  String
+  date     DateTime
+  status   AttendanceStatus
+  checkIn  DateTime?
+  checkOut DateTime?
+  note     String?
+
+  @@unique([staffId, date])
+  @@map("staffAttendances")
+}
+
+//enums 
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  ON_LEAVE
+  //HOLIDAY
+}
+
+// Enum pour le statut des examens paracliniques
+enum ExaminationStatus {
+  REQUESTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ExaminationCategory {
+  IMAGERIE // Radiographie, échographie, scanner, IRM, etc.
+  BIOLOGIE // Analyses de sang, tests biochimiques, etc.
+  HEMATOLOGIE // Tests sanguins spécifiques
+  BACTERIOLOGIE // Cultures bactériennes, antibiogrammes
+  PARASITOLOGIE // Recherche de parasites
+  ENDOCRINOLOGIE // Tests hormonaux
+  CARDIOLOGIE // ECG, test d'effort, etc.
+  NEUROLOGIE // EEG, EMG, etc.
+  PNEUMOLOGIE // Spirométrie, test respiratoire
+  UROLOGIE // Analyses d'urine, urographie
+  GYNECOLOGIE // Frottis, mammographie
+  ANATOMOPATHOLOGIE // Biopsies, analyses tissulaires
+  IMMUNOLOGIE // Tests immunologiques
+  GENETIQUE // Tests génétiques
+  BIOCHIMIE // Analyses biochimiques
+  SEROLOGIE // Tests sérologiques
+  TOXICOLOGIE // Tests toxicologiques
+  AUTRE // Autres types d'examens
+} */
+ 

@@ -1,8 +1,8 @@
 import { db } from "@/db/db";
-import { ContactProps, TypedRequestBody } from "@/types/types";
+import {TypedRequestBody } from "@/types/types";
 import { Request, Response } from "express";
 
-export async function createContact(
+/* export async function createContact(
   req: TypedRequestBody<ContactProps>,
   res: Response
 ) {
@@ -43,8 +43,8 @@ export async function createContact(
       error: "Something went wrong"
     });
   }
-}
-export async function getContacts(req: Request, res: Response) {
+} */
+/* export async function getContacts(req: Request, res: Response) {
   try {
     const contacts = await db.contact.findMany({
       orderBy: {
@@ -55,7 +55,7 @@ export async function getContacts(req: Request, res: Response) {
   } catch (error) {
     console.log(error);
   }
-}
+} */
 // export async function getCustomerById(req: Request, res: Response) {
 //   const { id } = req.params;
 //   try {
