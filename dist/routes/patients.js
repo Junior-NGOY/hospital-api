@@ -9,4 +9,7 @@ const patientRouter = express_1.default.Router();
 patientRouter.post("/patients", patients_1.createPatient);
 patientRouter.get("/patients", patients_1.getPatients);
 patientRouter.get("/patients/seq", patients_1.getNextPatientSequence);
+patientRouter.get("/patients/:id", patients_1.getPatientById);
+patientRouter.put("/patients/:id", patients_1.updatePatient);
+patientRouter.delete("/patients/:id", patients_1.deletePatient);
 exports.default = patientRouter;

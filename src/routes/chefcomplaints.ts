@@ -5,7 +5,6 @@ const chefComplaintRouter = express.Router();
 
 chefComplaintRouter.post("/chefcomplaints", createChefComplaint);
 chefComplaintRouter.get("/chefcomplaints", getChefComplaints);
-//subjectRouter.get("/subjects/brief", getBriefSubjects);
 //departmentRouter.post("/streams", createStream);
 //departmentRouter.get("/streams", getStreams);
 // adminRouter.get("/customers/:id", getCustomerById);

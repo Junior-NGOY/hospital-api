@@ -45,76 +45,107 @@ function getNextPatientSequence(req, res) {
 }
 function createPatient(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         const data = req.body;
+        const body = data;
         try {
-            if (data.fileNumber) {
-                const existingPatient = yield db_1.db.patient.findUnique({
-                    where: { fileNumber: data.fileNumber }
+            const fileNumber = body.fileNumber || body.regNo || `HOPE/IND/${new Date().getFullYear()}/0001`;
+            const phone = body.phone || body.phoneNumber || null;
+            const maritalStatus = body.maritalStatus ||
+                body.maritalStatut ||
+                undefined;
+            const firstName = body.firstName || ((_a = body.name) === null || _a === void 0 ? void 0 : _a.split(" ")[0]) || "Patient";
+            const lastName = body.lastName || ((_b = body.name) === null || _b === void 0 ? void 0 : _b.split(" ").slice(1).join(" ")) || firstName;
+            const name = body.name || `${firstName} ${lastName}`.trim();
+            const rawCategory = body.category || "PRIVATE";
+            const category = rawCategory === "INDIVIDUAL" || rawCategory === "IND"
+                ? "PRIVATE"
+                : rawCategory === "SUS" || rawCategory === "SUBSCRIBER"
+                    ? "SUBSCRIBER"
+                    : rawCategory === "PRIVATE" || rawCategory === "SUBSCRIBER"
+                        ? rawCategory
+                        : "PRIVATE";
+            const existingPatient = yield db_1.db.patient.findUnique({
+                where: { fileNumber },
+            });
+            if (existingPatient) {
+                return res.status(409).json({
+                    data: null,
+                    error: "Un patient avec ce numéro de dossier existe déjà",
                 });
-                if (existingPatient) {
-                    return res.status(409).json({
-                        data: null,
-                        error: "Un patient avec ce numéro de dossier existe déjà"
-                    });
-                }
             }
             const patient = yield db_1.db.patient.create({
                 data: {
-                    fileNumber: data.fileNumber,
-                    title: data.title,
-                    name: data.name,
-                    firstName: data.firstName,
-                    lastName: data.lastName,
-                    dateOfBirth: new Date(data.dateOfBirth),
-                    gender: data.gender,
-                    address: data.address,
-                    admissionDate: (0, convertDateToIso_1.convertDateToIso)(data.admissionDate),
-                    maritalStatus: data.maritalStatus,
-                    nationality: data.nationality,
-                    profession: data.profession,
-                    phone: data.phone,
-                    email: data.email,
-                    bloodType: data.bloodType,
-                    emergencyContact: data.emergencyContact,
-                    category: data.category || 'PRIVATE'
-                }
+                    fileNumber,
+                    title: body.title,
+                    name,
+                    firstName,
+                    lastName,
+                    dateOfBirth: new Date(body.dateOfBirth),
+                    gender: body.gender,
+                    address: body.address,
+                    admissionDate: body.admissionDate
+                        ? (() => {
+                            try {
+                                return (0, convertDateToIso_1.convertDateToIso)(String(body.admissionDate).slice(0, 10));
+                            }
+                            catch (_a) {
+                                return new Date(body.admissionDate);
+                            }
+                        })()
+                        : new Date(),
+                    maritalStatus,
+                    nationality: body.nationality,
+                    profession: body.profession,
+                    phone,
+                    email: body.email,
+                    bloodType: body.bloodType,
+                    emergencyContact: body.emergencyContact,
+                    category,
+                },
             });
             return res.status(201).json({
                 data: patient,
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.log(error);
             return res.status(500).json({
                 data: null,
-                error: "Something went wrong"
+                error: "Something went wrong",
             });
         }
     });
 }
 function getPatientById(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
-        const { patientId } = req.params;
+        const patientId = (req.params.id || req.params.patientId);
         try {
-            const patient = yield db_1.db.patient.findUnique({
+            let patient = yield db_1.db.patient.findUnique({
                 where: { id: patientId }
             });
+            if (!patient) {
+                patient = yield db_1.db.patient.findUnique({
+                    where: { fileNumber: patientId }
+                });
+            }
             if (!patient) {
                 return res.status(404).json({
                     data: null,
                     error: "Patient not found"
                 });
             }
+            const resolvedPatientId = patient.id;
             const recentQueueEntries = yield db_1.db.queueEntry.findMany({
-                where: { patientId },
+                where: { patientId: resolvedPatientId },
                 include: {
                     queue: true,
                 },
                 take: 5
             });
             const recentConsultations = yield db_1.db.consultation.findMany({
-                where: { patientId },
+                where: { patientId: resolvedPatientId },
                 include: {
                     doctor: {
                         include: {
@@ -126,10 +157,10 @@ function getPatientById(req, res) {
                 take: 5
             });
             const allergies = yield db_1.db.patientAllergy.findMany({
-                where: { patientId },
+                where: { patientId: resolvedPatientId },
             });
             const medicalHistories = yield db_1.db.medicalHistory.findMany({
-                where: { patientId },
+                where: { patientId: resolvedPatientId },
             });
             const age = (0, calculateAge_1.calculateAge)(patient.dateOfBirth);
             const responseData = Object.assign(Object.assign({}, patient), { age, recentQueueEntries: recentQueueEntries.map(entry => {
@@ -178,7 +209,7 @@ function getPatientById(req, res) {
 }
 function updatePatient(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
-        const { patientId } = req.params;
+        const patientId = (req.params.id || req.params.patientId);
         const data = req.body;
         try {
             const existingPatient = yield db_1.db.patient.findUnique({
@@ -190,9 +221,11 @@ function updatePatient(req, res) {
                     error: "Patient not found"
                 });
             }
-            if (data.fileNumber && data.fileNumber !== existingPatient.fileNumber) {
+            const fileNumber = data.fileNumber || data.regNo;
+            const phone = data.phone !== undefined ? data.phone : data.phoneNumber;
+            if (fileNumber && fileNumber !== existingPatient.fileNumber) {
                 const patientWithFileNumber = yield db_1.db.patient.findUnique({
-                    where: { fileNumber: data.fileNumber }
+                    where: { fileNumber }
                 });
                 if (patientWithFileNumber && patientWithFileNumber.id !== patientId) {
                     return res.status(409).json({
@@ -202,8 +235,12 @@ function updatePatient(req, res) {
                 }
             }
             const updateData = {};
-            if (data.fileNumber !== undefined)
-                updateData.fileNumber = data.fileNumber;
+            if (fileNumber !== undefined)
+                updateData.fileNumber = fileNumber;
+            if (data.title !== undefined)
+                updateData.title = data.title;
+            if (data.name !== undefined)
+                updateData.name = data.name;
             if (data.firstName !== undefined)
                 updateData.firstName = data.firstName;
             if (data.lastName !== undefined)
@@ -214,16 +251,33 @@ function updatePatient(req, res) {
                 updateData.gender = data.gender;
             if (data.address !== undefined)
                 updateData.address = data.address;
-            if (data.phone !== undefined)
-                updateData.phone = data.phone;
+            if (phone !== undefined)
+                updateData.phone = phone;
             if (data.email !== undefined)
                 updateData.email = data.email;
             if (data.bloodType !== undefined)
                 updateData.bloodType = data.bloodType;
             if (data.emergencyContact !== undefined)
                 updateData.emergencyContact = data.emergencyContact;
-            if (data.category !== undefined)
-                updateData.category = data.category;
+            if (data.category !== undefined) {
+                const raw = data.category;
+                updateData.category =
+                    raw === "INDIVIDUAL" || raw === "IND" ? "PRIVATE" : raw;
+            }
+            if (data.nationality !== undefined)
+                updateData.nationality = data.nationality;
+            if (data.profession !== undefined)
+                updateData.profession = data.profession;
+            if (data.maritalStatus !== undefined)
+                updateData.maritalStatus = data.maritalStatus;
+            if (data.admissionDate !== undefined) {
+                try {
+                    updateData.admissionDate = (0, convertDateToIso_1.convertDateToIso)(String(data.admissionDate).slice(0, 10));
+                }
+                catch (_a) {
+                    updateData.admissionDate = new Date(data.admissionDate);
+                }
+            }
             const updatedPatient = yield db_1.db.patient.update({
                 where: { id: patientId },
                 data: updateData
@@ -319,7 +373,7 @@ function searchPatients(req, res) {
 }
 function deletePatient(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
-        const { patientId } = req.params;
+        const patientId = (req.params.id || req.params.patientId);
         try {
             const patient = yield db_1.db.patient.findUnique({
                 where: { id: patientId }

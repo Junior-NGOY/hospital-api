@@ -10,39 +10,43 @@ datasource db {
 }
 
 model Hospital {
-  id               String            @id @default(cuid())
-  name             String
-  slug             String            @unique
-  address          String
-  phoneNumber      String
-  email            String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  departments      Department[]
-  staffSchedules   StaffSchedule[]
-  appointments     Appointment[]
-  consultations    Consultation[]
-  rooms            Room[]
-  incomes          Income[]
-  users            User[]
-  expenses         Expense[]
-  consultationFees ConsultationFee[]
-  branches         HospitalBranch[]
-  admissions       Admission[]
+  id                  String                     @id @default(cuid())
+  name                String
+  slug                String                     @unique
+  address             String
+  phoneNumber         String
+  email               String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  departments         Department[]
+  staffSchedules      StaffSchedule[]
+  appointments        Appointment[]
+  consultations       Consultation[]
+  rooms               Room[]
+  incomes             Income[]
+  users               User[]
+  expenses            Expense[]
+  consultationFees    ConsultationFee[]
+  branches            HospitalBranch[]
+  admissions          Admission[]
   financialStatistics FinancialStatistics[]
-  settings         HospitalSettings[]
-  emergencyContacts HospitalEmergencyContact[]
-  surgeries        Surgery[]
-  invoices         Invoice[]
-  labTests         LabTest[]
-  medications      Medication[]
-  queues           Queue[]
-  prescriptions    Prescription[]
+  settings            HospitalSettings[]
+  emergencyContacts   HospitalEmergencyContact[]
+  surgeries           Surgery[]
+  invoices            Invoice[]
+  labTests            LabTest[]
+  medications         Medication[]
+  queues              Queue[]
+  prescriptions       Prescription[]
+  equipment           Equipment[]
+  vehicles            Vehicle[]
+  medicalSupplies     MedicalSupply[]
+
   @@map("hospitals")
 }
 
 model HospitalBranch {
-  id           String   @id @default(cuid())
+  id           String  @id @default(cuid())
   hospitalId   String
   name         String
   address      String
@@ -52,23 +56,28 @@ model HospitalBranch {
   state        String?
   country      String?
   postalCode   String?
-  isMainBranch Boolean  @default(false)
+  isMainBranch Boolean @default(false)
 
-  hospital     Hospital @relation(fields: [hospitalId], references: [id])
-  users        User[]
-  departments  Department[]
-  appointments Appointment[]
-  consultations Consultation[]
-  admissions   Admission[]
-  surgeries    Surgery[]
+  hospital         Hospital          @relation(fields: [hospitalId], references: [id])
+  users            User[]
+  departments      Department[]
+  appointments     Appointment[]
+  consultations    Consultation[]
+  admissions       Admission[]
+  surgeries        Surgery[]
   staffSchedules   StaffSchedule[]
   incomes          Income[]
   expenses         Expense[]
   consultationFees ConsultationFee[]
   // Ajoute ici d'autres relations si besoin (ex: surgeries, invoices, etc.)
   rooms            Room[]
+  equipment        Equipment[]
+  vehicles         Vehicle[]
+  medicalSupplies  MedicalSupply[]
+
   @@map("hospital_branches")
 }
+
 // Utilisateurs du système
 model User {
   id         String   @id @default(cuid())
@@ -106,11 +115,11 @@ model User {
   dischargeInstructions DischargeInstruction[]
   payment               Payment[]
   queueEntry            QueueEntry[]
-  assignedQueueEntries  QueueEntry[]  @relation("QueueEntryAssignedTo")
+  assignedQueueEntries  QueueEntry[]           @relation("QueueEntryAssignedTo")
   staffSchedules        StaffSchedule[]
-  labTestsOrdered       LabTest[]     @relation("DoctorLabTests")
-  labTestsPerformed     LabTest[]     @relation("LabTechnician")
-  generalSignsRecorded  GeneralSign[] @relation("NurseGeneralSigns")
+  labTestsOrdered       LabTest[]              @relation("DoctorLabTests")
+  labTestsPerformed     LabTest[]              @relation("LabTechnician")
+  generalSignsRecorded  GeneralSign[]          @relation("NurseGeneralSigns")
 
   @@map("users")
 }
@@ -144,7 +153,7 @@ model Patient {
   bloodType                 BloodType?
   emergencyContact          String?
   nationality               String?
-  category                  PatientCategory           
+  category                  PatientCategory
   subscriptions             PatientSubscription[]
   admissions                Admission[]
   appointments              Appointment[]
@@ -163,10 +172,17 @@ model Patient {
   allergies                 PatientAllergy[]
   medicalHistories          MedicalHistory[]
   vaccinations              Vaccination[]
+  chronicConditions         ChronicCondition[]
+  familyHistories           FamilyHistory[]
+  socialHistory             SocialHistory?
+  patientEmergencyContacts  PatientEmergencyContact[]
+  examResults               ExamResult[]
+  medicalImages             MedicalImage[]
+  currentMedications        CurrentMedication[]
   consents                  PatientConsent[]
   documents                 PatientDocument[]
   transfers                 PatientTransfer[]
-  bedTransfers             BedTransfer[]
+  bedTransfers              BedTransfer[]
   accessLogs                PatientAccessLog[]
   teleconsultations         Teleconsultation[]
   createdAt                 DateTime                   @default(now())
@@ -398,21 +414,21 @@ model Administrator {
 
 // Personnel - Pharmaciens
 model Pharmacist {
-  id                  String                @id @default(cuid())
-  userId              String                @unique
-  licenseNumber       String                @unique
-  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
- // medicationDispensed MedicationDispensed[]
+  id            String @id @default(cuid())
+  userId        String @unique
+  licenseNumber String @unique
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // medicationDispensed MedicationDispensed[]
 
   @@map("pharmacists")
 }
 
 // Personnel - Techniciens de laboratoire
 model LabTechnician {
-  id             String    @id @default(cuid())
-  userId         String    @unique
+  id             String  @id @default(cuid())
+  userId         String  @unique
   specialization String?
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   //labTests       LabTest[]
 
   @@map("labTechnicians")
@@ -465,20 +481,21 @@ model DepartmentDoctor {
 
 // Chambres et lits
 model Room {
-  id             String       @id @default(uuid())
-  roomNumber     String       @unique
-  type           RoomType
-  capacity       Int
-  floor          Int
-  isAvailable    Boolean      @default(true)
-  departmentId   String
-  department     Department   @relation(fields: [departmentId], references: [id])
-  roomCategory   RoomCategory
-  beds           Bed[]
-  hopitalId      String?
-  branchId       String?
-  hospital        Hospital?    @relation(fields: [hopitalId], references: [id]) 
-  branch         HospitalBranch? @relation(fields: [branchId], references: [id])  
+  id           String          @id @default(uuid())
+  roomNumber   String          @unique
+  type         RoomType
+  capacity     Int
+  floor        Int
+  isAvailable  Boolean         @default(true)
+  departmentId String
+  department   Department      @relation(fields: [departmentId], references: [id])
+  roomCategory RoomCategory
+  beds         Bed[]
+  equipment    Equipment[]
+  hopitalId    String?
+  branchId     String?
+  hospital     Hospital?       @relation(fields: [hopitalId], references: [id])
+  branch       HospitalBranch? @relation(fields: [branchId], references: [id])
 
   @@map("rooms")
 }
@@ -508,16 +525,17 @@ enum RoomCategory {
 }
 
 model Bed {
-  id            String        @id @default(uuid())
-  bedNumber     String
-  isOccupied    Boolean       @default(false)
-  roomId        String
-  room          Room          @relation(fields: [roomId], references: [id])
-  admissions    Admission[]
-  fromTransfers PatientTransfer[] @relation("FromBed")
-  toTransfers   PatientTransfer[] @relation("ToBed")
-  fromBedTransfers BedTransfer[] @relation("FromBed")
-  toBedTransfers   BedTransfer[] @relation("ToBed")
+  id               String            @id @default(uuid())
+  bedNumber        String
+  isOccupied       Boolean           @default(false)
+  roomId           String
+  room             Room              @relation(fields: [roomId], references: [id])
+  admissions       Admission[]
+  fromTransfers    PatientTransfer[] @relation("FromBed")
+  toTransfers      PatientTransfer[] @relation("ToBed")
+  fromBedTransfers BedTransfer[]     @relation("FromBed")
+  toBedTransfers   BedTransfer[]     @relation("ToBed")
+
   @@unique([roomId, bedNumber])
   @@map("beds")
 }
@@ -542,16 +560,16 @@ model Admission {
   diagnosisAtDischarge String? // Diagnostic à la sortie
 
   // Relations existantes
-  hospital    Hospital?                  @relation(fields: [hospitalId], references: [id])
-  branch      HospitalBranch?            @relation(fields: [branchId], references: [id])
-  patient     Patient                    @relation(fields: [patientId], references: [id])
-  bed         Bed?                       @relation(fields: [bedId], references: [id])
-  vitalSigns  VitalSign[] @relation("AdmissionVitalSigns")
-  generalSigns GeneralSign[]
-  medications MedicationAdministration[] @relation("AdmissionMedications")
-  surgeries   Surgery[] @relation("AdmissionSurgeries")
-  transfers   BedTransfer[] @relation("AdmissionTransfers")
-  patientTransfers PatientTransfer[] @relation("AdmissionPatientTransfers")
+  hospital         Hospital?                  @relation(fields: [hospitalId], references: [id])
+  branch           HospitalBranch?            @relation(fields: [branchId], references: [id])
+  patient          Patient                    @relation(fields: [patientId], references: [id])
+  bed              Bed?                       @relation(fields: [bedId], references: [id])
+  vitalSigns       VitalSign[]                @relation("AdmissionVitalSigns")
+  generalSigns     GeneralSign[]
+  medications      MedicationAdministration[] @relation("AdmissionMedications")
+  surgeries        Surgery[]                  @relation("AdmissionSurgeries")
+  transfers        BedTransfer[]              @relation("AdmissionTransfers")
+  patientTransfers PatientTransfer[]          @relation("AdmissionPatientTransfers")
 
   // Nouvelles relations
   admittingDoctor       Doctor?               @relation("AdmittingDoctor", fields: [admittedBy], references: [id])
@@ -631,132 +649,138 @@ enum AppointmentStatus {
 
 // Consultations médicales
 model Consultation {
-  id             String   @id @default(cuid())
-  patientId      String
-  doctorId       String?
-  appointmentId  String?  @unique
-  hospitalId     String?
-  branchId       String?
-  date           DateTime @default(now())
-  chiefComplaintId String?
-  diagnosis      Json? // Changed from String? to Json? for structured diagnosis
-  symptoms       String?
-  notes          String?
-  followUpNeeded Boolean  @default(false)
-  followUpDate   DateTime?
-  consultationFee Float?
-  basePrice       Float?
-  appliedPrice    Float?
-  discountAmount  Float?
-  subscriptionId  String?
-  vitalSigns     VitalSign[]
-  generalSigns   GeneralSign[]
+  id                  String                @id @default(cuid())
+  patientId           String
+  doctorId            String?
+  appointmentId       String?               @unique
+  hospitalId          String?
+  branchId            String?
+  date                DateTime              @default(now())
+  chiefComplaintId    String?
+  diagnosis           Json? // Changed from String? to Json? for structured diagnosis
+  symptoms            String?
+  notes               String?
+  followUpNeeded      Boolean               @default(false)
+  followUpDate        DateTime?
+  consultationFee     Float?
+  basePrice           Float?
+  appliedPrice        Float?
+  discountAmount      Float?
+  subscriptionId      String?
+  vitalSigns          VitalSign[]
+  generalSigns        GeneralSign[]
   clinicalExamination ClinicalExamination[]
   paraclinicalExam    ParaclinicalExam[]
   prescriptions       Prescription[]
-  appointment         Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
-  patient             Patient      @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  doctor              Doctor?      @relation(fields: [doctorId], references: [id], onDelete: Restrict)
-  hospital            Hospital?    @relation(fields: [hospitalId], references: [id])
-  branch              HospitalBranch? @relation(fields: [branchId], references: [id])
-  chiefComplaint      ChiefComplaint? @relation(fields: [chiefComplaintId], references: [id])
+  appointment         Appointment?          @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  patient             Patient               @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor              Doctor?               @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  hospital            Hospital?             @relation(fields: [hospitalId], references: [id])
+  branch              HospitalBranch?       @relation(fields: [branchId], references: [id])
+  chiefComplaint      ChiefComplaint?       @relation(fields: [chiefComplaintId], references: [id])
   subscription        PatientSubscription?  @relation(fields: [subscriptionId], references: [id])
-  createdAt           DateTime     @default(now())
+  createdAt           DateTime              @default(now())
+
   @@index([patientId, date])
   @@index([doctorId, date])
   @@map("consultations")
 }
 
 model ChiefComplaint {
-  id             String   @id @default(cuid())
-  description    String
-  slug           String   @unique
-  consultations  Consultation[]
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String         @id @default(cuid())
+  description   String
+  slug          String         @unique
+  consultations Consultation[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
   @@map("chief_complaints")
 }
 
 model VitalSign {
-  id               String        @id @default(cuid())
-  patientId        String
-  nurseId          String?
-  consultationId   String?
-  admissionId      String?
-  admission        Admission? @relation("AdmissionVitalSigns", fields: [admissionId], references: [id])
-  temperature      Float?
-  respirationRate  Int?
-  height           Float?
-  weight           Float?
-  pa               Float?
-  ta               String?
-  ddr              String?
-  dpa              String?
-  pc               Float?
-  imc              Float?
-  pas              Float?
-  pad              Float?
-  fc               Float?
-  spo2             Float?
-  notes            String?
-  recordedAt       DateTime?
-  patient          Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  nurse            Nurse?        @relation(fields: [nurseId], references: [id], onDelete: Restrict)
-  consultation     Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  id              String        @id @default(cuid())
+  patientId       String
+  nurseId         String?
+  consultationId  String?
+  admissionId     String?
+  admission       Admission?    @relation("AdmissionVitalSigns", fields: [admissionId], references: [id])
+  temperature     Float?
+  respirationRate Int?
+  height          Float?
+  weight          Float?
+  pa              Float?
+  ta              String?
+  ddr             String?
+  dpa             String?
+  pc              Float?
+  imc             Float?
+  pas             Float?
+  pad             Float?
+  fc              Float?
+  spo2            Float?
+  notes           String?
+  recordedAt      DateTime?
+  patient         Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  nurse           Nurse?        @relation(fields: [nurseId], references: [id], onDelete: Restrict)
+  consultation    Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
   @@map("vitalsigns")
 }
 
 model ClinicalExamination {
-  id             String   @id @default(uuid())
+  id             String        @id @default(uuid())
   patientId      String
   doctorId       String?
   consultationId String?
-  date           DateTime @default(now())
+  date           DateTime      @default(now())
   findings       Json[]
-  patient        Patient         @relation(fields: [patientId], references: [id])
-  doctor         Doctor?         @relation(fields: [doctorId], references: [id])
-  consultation   Consultation?   @relation(fields: [consultationId], references: [id])
+  patient        Patient       @relation(fields: [patientId], references: [id])
+  doctor         Doctor?       @relation(fields: [doctorId], references: [id])
+  consultation   Consultation? @relation(fields: [consultationId], references: [id])
+
   @@map("clinical_examinations")
 }
 
 model ParaclinicalExam {
-  id             String  @id @default(uuid())
-  patientId      String
-  doctorId       String?
-  consultationId String?
-  examType       String
-  status         String  @default("REQUESTED")
-  priority       String  @default("ROUTINE")
-  requestedAt    DateTime  @default(now())
-  scheduledAt    DateTime?
-  requestReason  String?
+  id              String        @id @default(uuid())
+  patientId       String
+  doctorId        String?
+  consultationId  String?
+  examType        String
+  status          String        @default("REQUESTED")
+  priority        String        @default("ROUTINE")
+  requestedAt     DateTime      @default(now())
+  scheduledAt     DateTime?
+  requestReason   String?
   clinicalContext String?
-  instructions   String?
-  patient        Patient         @relation(fields: [patientId], references: [id])
-  doctor         Doctor?         @relation(fields: [doctorId], references: [id])
-  consultation   Consultation?   @relation(fields: [consultationId], references: [id])
+  instructions    String?
+  patient         Patient       @relation(fields: [patientId], references: [id])
+  doctor          Doctor?       @relation(fields: [doctorId], references: [id])
+  consultation    Consultation? @relation(fields: [consultationId], references: [id])
+
   @@map("paraclinical_exams")
 }
 
 model Prescription {
-  id             String   @id @default(cuid())
+  id             String                   @id @default(cuid())
   patientId      String
   doctorId       String?
   consultationId String?
   hospitalId     String?
-  date           DateTime @default(now())
+  date           DateTime                 @default(now())
   notes          String?
   medications    PrescriptionMedication[]
-  patient        Patient      @relation(fields: [patientId], references: [id])
-  doctor         Doctor?      @relation(fields: [doctorId], references: [id])
-  consultation   Consultation? @relation(fields: [consultationId], references: [id])
-  hospital       Hospital?    @relation(fields: [hospitalId], references: [id])
-  createdAt      DateTime     @default(now())
+  patient        Patient                  @relation(fields: [patientId], references: [id])
+  doctor         Doctor?                  @relation(fields: [doctorId], references: [id])
+  consultation   Consultation?            @relation(fields: [consultationId], references: [id])
+  hospital       Hospital?                @relation(fields: [hospitalId], references: [id])
+  createdAt      DateTime                 @default(now())
+
   @@map("prescriptions")
 }
 
 model PrescriptionMedication {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   prescriptionId String
   medicationId   String
   dosage         String
@@ -765,21 +789,23 @@ model PrescriptionMedication {
   instructions   String?
   prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
   medication     Medication   @relation(fields: [medicationId], references: [id])
+
   @@map("prescription_medications")
 }
 
 model Medication {
-  id                      String   @id @default(cuid())
+  id                      String                     @id @default(cuid())
   name                    String
-  form                    String?  // Form of medication (tablet, capsule, etc.)
+  form                    String? // Form of medication (tablet, capsule, etc.)
   supplierId              String?
   hospitalId              String?
-  stock                   Int?     @default(0)
-  supplier                Supplier? @relation(fields: [supplierId], references: [id])
-  hospital                Hospital? @relation(fields: [hospitalId], references: [id])
+  stock                   Int?                       @default(0)
+  supplier                Supplier?                  @relation(fields: [supplierId], references: [id])
+  hospital                Hospital?                  @relation(fields: [hospitalId], references: [id])
   prescriptionMedications PrescriptionMedication[]
   inventories             Inventory[]
   administrations         MedicationAdministration[] @relation("MedicationAdministrations")
+
   @@map("medications")
 }
 
@@ -824,6 +850,7 @@ model MedicalProcedure {
   duration    Int? // Durée estimée en minutes
 
   doctorFees DoctorProcedureFee[]
+
   @@map("medical_procedures")
 }
 
@@ -836,17 +863,18 @@ enum ProcedureComplexity {
 
 // Forfaits d'hospitalisation
 model HospitalizationPackage {
-  id             String  @id @default(uuid())
-  name           String
-  description    String?
-  duration       Int // Durée en jours
-  roomCategory   RoomCategory
+  id               String       @id @default(uuid())
+  name             String
+  description      String?
+  duration         Int // Durée en jours
+  roomCategory     RoomCategory
   basePrice        Float
   includedServices String[] // Liste des services inclus
   excludedServices String[] // Liste des services exclus
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
-  Admission    Admission[]
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  Admission        Admission[]
+
   @@map("hospitalization_packages")
 }
 
@@ -897,61 +925,66 @@ model FinancialStatistics {
   // Relations
   hospital   Hospital    @relation(fields: [hospitalId], references: [id])
   department Department? @relation(fields: [departmentId], references: [id])
+
   @@map("financial_statistics")
 }
 
 model StaffSchedule {
-  id           String   @id @default(cuid())
-  hospitalId   String
-  branchId     String?
-  userId       String
-  startDate    DateTime
-  endDate      DateTime
-  shiftType    String? // Ex: "Day", "Night", "OnCall"
-  notes        String?
-  hospital     Hospital @relation(fields: [hospitalId], references: [id])
-  branch       HospitalBranch? @relation(fields: [branchId], references: [id])
-  user         User     @relation(fields: [userId], references: [id])
+  id         String          @id @default(cuid())
+  hospitalId String
+  branchId   String?
+  userId     String
+  startDate  DateTime
+  endDate    DateTime
+  shiftType  String? // Ex: "Day", "Night", "OnCall"
+  notes      String?
+  hospital   Hospital        @relation(fields: [hospitalId], references: [id])
+  branch     HospitalBranch? @relation(fields: [branchId], references: [id])
+  user       User            @relation(fields: [userId], references: [id])
+
   @@map("staff_schedules")
 }
 
 model Income {
-  id           String   @id @default(cuid())
-  hospitalId   String
-  branchId     String?
-  amount       Float
-  source       String
-  date         DateTime @default(now())
-  notes        String?
-  hospital     Hospital @relation(fields: [hospitalId], references: [id])
-  branch       HospitalBranch? @relation(fields: [branchId], references: [id])
+  id         String          @id @default(cuid())
+  hospitalId String
+  branchId   String?
+  amount     Float
+  source     String
+  date       DateTime        @default(now())
+  notes      String?
+  hospital   Hospital        @relation(fields: [hospitalId], references: [id])
+  branch     HospitalBranch? @relation(fields: [branchId], references: [id])
+
   @@map("incomes")
 }
 
 model Expense {
-  id           String   @id @default(cuid())
-  hospitalId   String
-  branchId     String?
-  amount       Float
-  category     String
-  date         DateTime @default(now())
-  notes        String?
-  hospital     Hospital @relation(fields: [hospitalId], references: [id])
-  branch       HospitalBranch? @relation(fields: [branchId], references: [id])
+  id         String          @id @default(cuid())
+  hospitalId String
+  branchId   String?
+  amount     Float
+  category   String
+  date       DateTime        @default(now())
+  notes      String?
+  hospital   Hospital        @relation(fields: [hospitalId], references: [id])
+  branch     HospitalBranch? @relation(fields: [branchId], references: [id])
+
   @@map("expenses")
 }
 
 model ConsultationFee {
-  id           String   @id @default(cuid())
-  hospitalId   String
-  branchId     String?
-  type         String // Ex: "General", "Specialist"
-  amount       Float
-  isActive     Boolean @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  hospital     Hospital @relation(fields: [hospitalId], references: [id])
-  branch       HospitalBranch? @relation(fields: [branchId], references: [id])
+  id         String          @id @default(cuid())
+  hospitalId String
+  branchId   String?
+  type       String // Ex: "General", "Specialist"
+  amount     Float
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  hospital   Hospital        @relation(fields: [hospitalId], references: [id])
+  branch     HospitalBranch? @relation(fields: [branchId], references: [id])
+
   @@map("consultation_fees")
 }
 
@@ -968,41 +1001,42 @@ enum ServiceCategory {
 
 // Services individuels (ex: Consultation générale, Bilan sanguin, IRM, Chambre privée, etc.)
 model Service {
-  id          String         @id @default(cuid())
+  id          String          @id @default(cuid())
   name        String
-  code        String         @unique
+  code        String          @unique
   description String?
   category    ServiceCategory
-  isActive    Boolean        @default(true)
+  isActive    Boolean         @default(true)
 
   // Relations
-  usages      SubscriptionUsage[]
+  usages SubscriptionUsage[]
+
   @@map("services")
 }
 
 model Invoice {
-  id                String                @id @default(cuid())
-  invoiceNumber     String                @unique
-  patientId         String
-  hospitalId        String?
-  subscriptionId    String?
-  accountantId      String?
-  dateIssued        DateTime              @default(now())
-  dueDate           DateTime?
-  totalAmount       Float
-  amountPaid        Float                 @default(0)
-  status            InvoiceStatus         @default(PENDING)
-  paymentMethod     PaymentMethod?
-  notes             String?
+  id             String         @id @default(cuid())
+  invoiceNumber  String         @unique
+  patientId      String
+  hospitalId     String?
+  subscriptionId String?
+  accountantId   String?
+  dateIssued     DateTime       @default(now())
+  dueDate        DateTime?
+  totalAmount    Float
+  amountPaid     Float          @default(0)
+  status         InvoiceStatus  @default(PENDING)
+  paymentMethod  PaymentMethod?
+  notes          String?
 
   // Relations
-  patient           Patient               @relation(fields: [patientId], references: [id])
-  hospital          Hospital?             @relation(fields: [hospitalId], references: [id])
-  subscription      PatientSubscription?  @relation(fields: [subscriptionId], references: [id])
-  accountant        Accountant?           @relation(fields: [accountantId], references: [id])
+  patient      Patient              @relation(fields: [patientId], references: [id])
+  hospital     Hospital?            @relation(fields: [hospitalId], references: [id])
+  subscription PatientSubscription? @relation(fields: [subscriptionId], references: [id])
+  accountant   Accountant?          @relation(fields: [accountantId], references: [id])
 
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("invoices")
 }
@@ -1022,34 +1056,36 @@ model MedicalRecord {
   description String?
   date        DateTime @default(now())
   patient     Patient  @relation(fields: [patientId], references: [id])
+
   @@map("medical_records")
 }
 
 model MedicationAdministration {
-  id           String      @id @default(cuid())
-  patientId    String
-  nurseId      String
-  medicationId String?
-  medication   String      // Keep as string for backward compatibility
-  dose         String
-  route        String?
-  timeGiven    DateTime    @default(now())
-  notes        String?
-  admissionId  String?
-  admission    Admission?  @relation("AdmissionMedications", fields: [admissionId], references: [id])
-  patient      Patient     @relation(fields: [patientId], references: [id])
-  nurse        Nurse       @relation(fields: [nurseId], references: [id])
+  id            String      @id @default(cuid())
+  patientId     String
+  nurseId       String
+  medicationId  String?
+  medication    String // Keep as string for backward compatibility
+  dose          String
+  route         String?
+  timeGiven     DateTime    @default(now())
+  notes         String?
+  admissionId   String?
+  admission     Admission?  @relation("AdmissionMedications", fields: [admissionId], references: [id])
+  patient       Patient     @relation(fields: [patientId], references: [id])
+  nurse         Nurse       @relation(fields: [nurseId], references: [id])
   medicationRef Medication? @relation("MedicationAdministrations", fields: [medicationId], references: [id])
+
   @@map("medication_administrations")
 }
 
 model Surgery {
-  id                    String               @id @default(cuid())
+  id                    String    @id @default(cuid())
   patientId             String
   doctorId              String?
   hospitalId            String?
   branchId              String?
-  date                  DateTime             @default(now())
+  date                  DateTime  @default(now())
   type                  String
   surgeryType           String?
   description           String?
@@ -1062,19 +1098,19 @@ model Surgery {
   postOpDiagnosis       String?
   complications         String?
   notes                 String?
-  createdAt             DateTime             @default(now())
+  createdAt             DateTime  @default(now())
   patientSubscriptionId String?
   admissionId           String?
   primarySurgeonId      String?
-  
-  patient               Patient              @relation(fields: [patientId], references: [id])
-  doctor                Doctor?              @relation(fields: [doctorId], references: [id])
-  hospital              Hospital?            @relation(fields: [hospitalId], references: [id])
-  branch                HospitalBranch?      @relation(fields: [branchId], references: [id])
-  patientSubscription   PatientSubscription? @relation(fields: [patientSubscriptionId], references: [id])
-  admission             Admission?           @relation("AdmissionSurgeries", fields: [admissionId], references: [id])
-  primarySurgeon        Doctor?              @relation("PrimarySurgeon", fields: [primarySurgeonId], references: [id])
-  surgeryDoctors        SurgeryDoctor[]
+
+  patient             Patient              @relation(fields: [patientId], references: [id])
+  doctor              Doctor?              @relation(fields: [doctorId], references: [id])
+  hospital            Hospital?            @relation(fields: [hospitalId], references: [id])
+  branch              HospitalBranch?      @relation(fields: [branchId], references: [id])
+  patientSubscription PatientSubscription? @relation(fields: [patientSubscriptionId], references: [id])
+  admission           Admission?           @relation("AdmissionSurgeries", fields: [admissionId], references: [id])
+  primarySurgeon      Doctor?              @relation("PrimarySurgeon", fields: [primarySurgeonId], references: [id])
+  surgeryDoctors      SurgeryDoctor[]
 
   @@map("surgeries")
 }
@@ -1085,67 +1121,239 @@ model QueueEntry {
   arrivalTime  DateTime  @default(now())
   status       String?
   ticketNumber Int?
-  priority     String?   // LOW, MEDIUM, HIGH, URGENT
+  priority     String? // LOW, MEDIUM, HIGH, URGENT
   notes        String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   completedAt  DateTime?
   assignedToId String?
-  
-  patient      Patient   @relation(fields: [patientId], references: [id])
-  userId       String?
-  user         User?     @relation(fields: [userId], references: [id])
-  queueId      String?
-  queue        Queue?    @relation(fields: [queueId], references: [id])
-  assignedTo   User?     @relation("QueueEntryAssignedTo", fields: [assignedToId], references: [id])
-  
+
+  patient    Patient @relation(fields: [patientId], references: [id])
+  userId     String?
+  user       User?   @relation(fields: [userId], references: [id])
+  queueId    String?
+  queue      Queue?  @relation(fields: [queueId], references: [id])
+  assignedTo User?   @relation("QueueEntryAssignedTo", fields: [assignedToId], references: [id])
+
   @@map("queue_entries")
 }
 
 model PatientAllergy {
   id            String    @id @default(cuid())
   patientId     String
-  allergen      String    // This can be used as allergenType
-  reaction      String?
-  severity      String?
+  allergen      String
+  allergenType  String    @default("OTHER") // MEDICATION | FOOD | ENVIRONMENTAL | OTHER
+  reaction      String? // JSON array or comma-separated reactions
+  severity      String? // MILD | MODERATE | SEVERE | LIFE_THREATENING
+  onsetDate     DateTime?
   diagnosedDate DateTime?
+  diagnosedBy   String?
   notes         String?
   isActive      Boolean   @default(true)
-  patient       Patient   @relation(fields: [patientId], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  patient       Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
   @@map("patient_allergies")
 }
 
 model MedicalHistory {
   id            String    @id @default(cuid())
   patientId     String
-  condition     String    // This can be used as conditionType
+  condition     String
   notes         String?
   date          DateTime  @default(now())
   diagnosedDate DateTime?
   createdAt     DateTime  @default(now())
-  patient       Patient   @relation(fields: [patientId], references: [id])
+  patient       Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
   @@map("medical_histories")
 }
 
 model Vaccination {
-  id         String    @id @default(cuid())
-  patientId  String
-  vaccine    String
-  date       DateTime  @default(now())
-  notes      String?
-  doseNumber Int?
-  createdAt  DateTime  @default(now())
-  patient    Patient   @relation(fields: [patientId], references: [id])
+  id                 String    @id @default(cuid())
+  patientId          String
+  vaccine            String // legacy / short name
+  vaccineName        String?
+  vaccineType        String?
+  manufacturer       String?
+  lotNumber          String?
+  administrationDate DateTime  @default(now())
+  administeredBy     String?
+  site               String? // LEFT_ARM | RIGHT_ARM | LEFT_THIGH | RIGHT_THIGH | OTHER
+  doseNumber         Int?
+  totalDoses         Int?
+  nextDueDate        DateTime?
+  reactions          String? // JSON array
+  notes              String?
+  date               DateTime? // legacy alias
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  patient            Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
   @@map("vaccinations")
 }
 
+model ChronicCondition {
+  id             String    @id @default(cuid())
+  patientId      String
+  condition      String
+  icdCode        String?
+  diagnosisDate  DateTime  @default(now())
+  diagnosedBy    String?
+  severity       String    @default("MODERATE") // MILD | MODERATE | SEVERE
+  status         String    @default("ACTIVE") // ACTIVE | REMISSION | RESOLVED
+  treatmentPlan  String?
+  lastReviewDate DateTime?
+  nextReviewDate DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  patient        Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("chronic_conditions")
+}
+
+model FamilyHistory {
+  id           String   @id @default(cuid())
+  patientId    String
+  relation     String // FATHER | MOTHER | SIBLING | GRANDPARENT | AUNT_UNCLE | COUSIN | OTHER
+  condition    String
+  ageOfOnset   Int?
+  isDeceased   Boolean  @default(false)
+  causeOfDeath String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("family_histories")
+}
+
+model SocialHistory {
+  id                String   @id @default(cuid())
+  patientId         String   @unique
+  smokingStatus     String   @default("NEVER") // NEVER | FORMER | CURRENT
+  smokingDetails    Json?
+  alcoholUse        String   @default("NEVER") // NEVER | OCCASIONAL | MODERATE | HEAVY
+  alcoholDetails    Json?
+  drugUse           String   @default("NEVER") // NEVER | FORMER | CURRENT
+  drugDetails       Json?
+  occupation        String?
+  maritalStatus     String?
+  education         String?
+  livingArrangement String?
+  exerciseFrequency String?
+  dietType          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  patient           Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("social_histories")
+}
+
+model PatientEmergencyContact {
+  id               String   @id @default(cuid())
+  patientId        String
+  name             String
+  relationship     String
+  phoneNumber      String
+  alternatePhone   String?
+  email            String?
+  address          Json?
+  isPrimary        Boolean  @default(false)
+  canMakeDecisions Boolean  @default(false)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  patient          Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("patient_emergency_contacts")
+}
+
+model ExamResult {
+  id             String    @id @default(cuid())
+  patientId      String
+  examType       String // BLOOD_TEST | URINE_TEST | RADIOLOGY | ECG | ...
+  examName       String
+  orderedBy      String?
+  performedBy    String?
+  orderDate      DateTime  @default(now())
+  performedDate  DateTime?
+  resultDate     DateTime?
+  results        Json      @default("[]") // ExamResultData[]
+  interpretation String?
+  status         String    @default("ORDERED") // ORDERED | IN_PROGRESS | COMPLETED | CANCELLED
+  priority       String    @default("ROUTINE") // ROUTINE | URGENT | STAT
+  attachments    String[]  @default([])
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  patient        Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("exam_results")
+}
+
+model MedicalImage {
+  id              String   @id @default(cuid())
+  patientId       String
+  imageType       String // X_RAY | CT_SCAN | MRI | ULTRASOUND | ...
+  bodyPart        String
+  studyDate       DateTime @default(now())
+  orderedBy       String?
+  performedBy     String?
+  radiologist     String?
+  indication      String?
+  findings        String?
+  impression      String?
+  recommendations String?
+  imageUrls       String[] @default([])
+  dicomUrls       String[] @default([])
+  status          String   @default("SCHEDULED") // SCHEDULED | IN_PROGRESS | COMPLETED | REPORTED
+  priority        String   @default("ROUTINE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("medical_images")
+}
+
+model CurrentMedication {
+  id           String    @id @default(cuid())
+  patientId    String
+  name         String
+  dosage       String
+  frequency    String
+  startDate    DateTime  @default(now())
+  endDate      DateTime?
+  prescribedBy String?
+  indication   String?
+  status       String    @default("ACTIVE") // ACTIVE | DISCONTINUED | COMPLETED
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  patient      Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@map("current_medications")
+}
+
 model PatientConsent {
-  id         String   @id @default(cuid())
-  patientId  String
+  id          String   @id @default(cuid())
+  patientId   String
   consentType String
-  given      Boolean  @default(false)
-  date       DateTime @default(now())
-  patient    Patient  @relation(fields: [patientId], references: [id])
+  given       Boolean  @default(false)
+  date        DateTime @default(now())
+  patient     Patient  @relation(fields: [patientId], references: [id])
+
   @@map("patient_consents")
 }
 
@@ -1156,25 +1364,27 @@ model PatientDocument {
   fileUrl    String
   uploadedAt DateTime @default(now())
   patient    Patient  @relation(fields: [patientId], references: [id])
+
   @@map("patient_documents")
 }
 
 model PatientTransfer {
-  id              String   @id @default(cuid())
-  patientId       String
+  id               String      @id @default(cuid())
+  patientId        String
   fromDepartmentId String?
   toDepartmentId   String?
   fromBedId        String?
   toBedId          String?
-  transferDate     DateTime @default(now())
+  transferDate     DateTime    @default(now())
   reason           String?
-  admissionId String?
-  admission   Admission? @relation("AdmissionPatientTransfers", fields: [admissionId], references: [id])
-  patient          Patient  @relation(fields: [patientId], references: [id])
+  admissionId      String?
+  admission        Admission?  @relation("AdmissionPatientTransfers", fields: [admissionId], references: [id])
+  patient          Patient     @relation(fields: [patientId], references: [id])
   fromDepartment   Department? @relation("FromDepartment", fields: [fromDepartmentId], references: [id])
   toDepartment     Department? @relation("ToDepartment", fields: [toDepartmentId], references: [id])
-  fromBed          Bed?     @relation("FromBed", fields: [fromBedId], references: [id])
-  toBed            Bed?     @relation("ToBed", fields: [toBedId], references: [id])
+  fromBed          Bed?        @relation("FromBed", fields: [fromBedId], references: [id])
+  toBed            Bed?        @relation("ToBed", fields: [toBedId], references: [id])
+
   @@map("patient_transfers")
 }
 
@@ -1182,85 +1392,90 @@ model SurgeryDoctor {
   surgeryId String
   doctorId  String
   role      String? // e.g. "Surgeon", "Assistant", "Anesthetist"
-  surgery   Surgery  @relation(fields: [surgeryId], references: [id])
-  doctor    Doctor   @relation(fields: [doctorId], references: [id])
+  surgery   Surgery @relation(fields: [surgeryId], references: [id])
+  doctor    Doctor  @relation(fields: [doctorId], references: [id])
 
   @@id([surgeryId, doctorId])
   @@map("surgery_doctors")
 }
 
 model BedTransfer {
-  id              String   @id @default(cuid())
-  fromBedId       String?
-  toBedId         String?
-  patientId       String
-  userId         String
-  transferDate    DateTime @default(now())
-  reason          String?
-  admissionId String?
-  admission   Admission? @relation("AdmissionTransfers", fields: [admissionId], references: [id])
-  fromBed         Bed?     @relation("FromBed", fields: [fromBedId], references: [id])
-  toBed           Bed?     @relation("ToBed", fields: [toBedId], references: [id])
-  patient         Patient  @relation(fields: [patientId], references: [id])
-  user            User     @relation(fields: [userId], references: [id])
+  id           String     @id @default(cuid())
+  fromBedId    String?
+  toBedId      String?
+  patientId    String
+  userId       String
+  transferDate DateTime   @default(now())
+  reason       String?
+  admissionId  String?
+  admission    Admission? @relation("AdmissionTransfers", fields: [admissionId], references: [id])
+  fromBed      Bed?       @relation("FromBed", fields: [fromBedId], references: [id])
+  toBed        Bed?       @relation("ToBed", fields: [toBedId], references: [id])
+  patient      Patient    @relation(fields: [patientId], references: [id])
+  user         User       @relation(fields: [userId], references: [id])
+
   @@map("bed_transfers")
 }
 
 model Inventory {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   supplierId   String
   medicationId String
   quantity     Int
   unit         String
-  receivedAt   DateTime @default(now())
+  receivedAt   DateTime  @default(now())
   expiryDate   DateTime?
   notes        String?
 
-  supplier     Supplier   @relation(fields: [supplierId], references: [id])
-  medication   Medication @relation(fields: [medicationId], references: [id])
+  supplier   Supplier   @relation(fields: [supplierId], references: [id])
+  medication Medication @relation(fields: [medicationId], references: [id])
 
   @@map("inventories")
 }
 
 model DailyNote {
-  id           String   @id @default(cuid())
-  admissionId  String
-  authorId     String
-  note         String
-  createdAt    DateTime @default(now())
-  admission    Admission @relation(fields: [admissionId], references: [id])
-  author       User      @relation(fields: [authorId], references: [id])
+  id          String    @id @default(cuid())
+  admissionId String
+  authorId    String
+  note        String
+  createdAt   DateTime  @default(now())
+  admission   Admission @relation(fields: [admissionId], references: [id])
+  author      User      @relation(fields: [authorId], references: [id])
+
   @@map("daily_notes")
 }
 
 model AdmissionCareTeam {
-  id           String   @id @default(cuid())
-  admissionId  String
-  userId       String
-  role         String? // e.g. "Nurse", "Doctor", "Specialist"
-  admission    Admission @relation(fields: [admissionId], references: [id])
-  user         User      @relation(fields: [userId], references: [id])
+  id          String    @id @default(cuid())
+  admissionId String
+  userId      String
+  role        String? // e.g. "Nurse", "Doctor", "Specialist"
+  admission   Admission @relation(fields: [admissionId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
   @@map("admission_care_teams")
 }
 
 model MealOrder {
-  id           String   @id @default(cuid())
-  admissionId  String
-  mealType     String // e.g. "Breakfast", "Lunch", "Dinner"
-  description  String?
-  orderedAt    DateTime @default(now())
-  admission    Admission @relation(fields: [admissionId], references: [id])
+  id          String    @id @default(cuid())
+  admissionId String
+  mealType    String // e.g. "Breakfast", "Lunch", "Dinner"
+  description String?
+  orderedAt   DateTime  @default(now())
+  admission   Admission @relation(fields: [admissionId], references: [id])
+
   @@map("meal_orders")
 }
 
 model DischargeInstruction {
-  id           String   @id @default(cuid())
-  admissionId  String @unique
+  id           String    @id @default(cuid())
+  admissionId  String    @unique
   instructions String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
   admission    Admission @relation(fields: [admissionId], references: [id])
   userId       String
-  user         User    @relation(fields: [userId], references: [id])
+  user         User      @relation(fields: [userId], references: [id])
+
   @@map("discharge_instructions")
 }
 
@@ -1272,58 +1487,62 @@ model Notification {
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
+
   @@map("notifications")
 }
 
 model StaffLeave {
-  id            String   @id @default(cuid())
-  userId        String
-  startDate     DateTime
-  endDate       DateTime
-  reason        String?
-  status        String   @default("PENDING")
-  approverId    String?
-  user          User     @relation(fields: [userId], references: [id])
-  approver      User?    @relation("LeaveApprover", fields: [approverId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id         String   @id @default(cuid())
+  userId     String
+  startDate  DateTime
+  endDate    DateTime
+  reason     String?
+  status     String   @default("PENDING")
+  approverId String?
+  user       User     @relation(fields: [userId], references: [id])
+  approver   User?    @relation("LeaveApprover", fields: [approverId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   @@map("staff_leaves")
 }
 
 model StaffEvaluation {
-  id           String   @id @default(cuid())
-  userId       String
-  evaluatorId  String
-  evaluation   String
-  score        Int?
-  date         DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id])
-  evaluator    User     @relation("Evaluator", fields: [evaluatorId], references: [id])
+  id          String   @id @default(cuid())
+  userId      String
+  evaluatorId String
+  evaluation  String
+  score       Int?
+  date        DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  evaluator   User     @relation("Evaluator", fields: [evaluatorId], references: [id])
+
   @@map("staff_evaluations")
 }
 
 model AuditLog {
-  id          String   @id @default(cuid())
-  userId      String?
-  action      String
-  details     String?
-  createdAt   DateTime @default(now())
-  user        User?    @relation(fields: [userId], references: [id])
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
   @@map("audit_logs")
 }
 
 model Payment {
-  id            String   @id @default(cuid())
-  userId        String
-  amount        Float
-  paymentDate   DateTime @default(now())
-  method        PaymentMethod
-  reference     String?
-  notes         String?
-  user          User     @relation(fields: [userId], references: [id])
+  id          String        @id @default(cuid())
+  userId      String
+  amount      Float
+  paymentDate DateTime      @default(now())
+  method      PaymentMethod
+  reference   String?
+  notes       String?
+  user        User          @relation(fields: [userId], references: [id])
+
   @@map("payments")
 }
- 
 
 model Queue {
   id           String   @id @default(cuid())
@@ -1335,37 +1554,146 @@ model Queue {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  
-  department   Department @relation(fields: [departmentId], references: [id])
-  hospital     Hospital?  @relation(fields: [hospitalId], references: [id])
-  entries      QueueEntry[]
+
+  department         Department          @relation(fields: [departmentId], references: [id])
+  hospital           Hospital?           @relation(fields: [hospitalId], references: [id])
+  entries            QueueEntry[]
   queueConfiguration QueueConfiguration?
-  
+
   @@map("queues")
 }
 
 model Equipment {
-  id           String   @id @default(cuid())
-  departmentId String
-  name         String
-  type         String?
-  serialNumber String?
-  status       String? // e.g. "IN_USE", "AVAILABLE", "MAINTENANCE"
-  purchaseDate DateTime?
-  department   Department @relation(fields: [departmentId], references: [id])
+  id                  String              @id @default(cuid())
+  hospitalId          String?
+  branchId            String?
+  departmentId        String?
+  roomId              String?
+  name                String
+  model               String?
+  brand               String?
+  type                String?
+  serialNumber        String?
+  status              String?             @default("OPERATIONAL") // OPERATIONAL | MAINTENANCE | OUT_OF_ORDER | RETIRED
+  purchaseDate        DateTime?
+  warrantyEndDate     DateTime?
+  purchasePrice       Float?
+  currentValue        Float?
+  location            String?
+  departmentName      String? // code métier (CARDIOLOGY, etc.) si pas de FK
+  description         String?
+  specifications      String?
+  responsibleUserId   String?
+  lastMaintenanceDate DateTime?
+  nextMaintenanceDate DateTime?
+  notes               String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  hospital            Hospital?           @relation(fields: [hospitalId], references: [id])
+  branch              HospitalBranch?     @relation(fields: [branchId], references: [id])
+  department          Department?         @relation(fields: [departmentId], references: [id])
+  room                Room?               @relation(fields: [roomId], references: [id])
+  maintenanceRecords  MaintenanceRecord[]
+
   @@map("equipment")
 }
 
+model MaintenanceRecord {
+  id            String    @id @default(cuid())
+  equipmentId   String
+  type          String // PREVENTIVE | CORRECTIVE | EMERGENCY
+  priority      String    @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  description   String
+  scheduledDate DateTime
+  completedDate DateTime?
+  performedBy   String?
+  cost          Float?
+  notes         String?
+  status        String    @default("SCHEDULED") // SCHEDULED | IN_PROGRESS | COMPLETED | CANCELLED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+  @@map("maintenance_records")
+}
+
+model Vehicle {
+  id                 String          @id @default(cuid())
+  hospitalId         String?
+  branchId           String?
+  name               String
+  type               String // AMBULANCE, MEDICAL_TRANSPORT, ...
+  brand              String?
+  model              String?
+  year               Int?
+  licensePlate       String
+  vin                String?
+  fuelType           String?
+  capacity           Int?
+  mileage            Int?
+  lastServiceDate    DateTime?
+  nextServiceDate    DateTime?
+  insuranceExpiry    DateTime?
+  registrationExpiry DateTime?
+  status             String?         @default("AVAILABLE")
+  location           String?
+  assignedDriverId   String?
+  purchaseDate       DateTime?
+  purchasePrice      Float?
+  currentValue       Float?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  hospital Hospital?       @relation(fields: [hospitalId], references: [id])
+  branch   HospitalBranch? @relation(fields: [branchId], references: [id])
+
+  @@map("vehicles")
+}
+
+/** Consommables non pharmaceutiques (DM, EPI, réactifs…). Pharma = Medication. */
+model MedicalSupply {
+  id            String          @id @default(cuid())
+  hospitalId    String?
+  branchId      String?
+  name          String
+  brand         String?
+  type          String
+  category      String?
+  description   String?
+  unit          String
+  currentStock  Int             @default(0)
+  minStock      Int             @default(0)
+  maxStock      Int             @default(0)
+  unitPrice     Float           @default(0)
+  expiryDate    DateTime?
+  batchNumber   String?
+  supplier      String?
+  location      String?
+  status        String?         @default("IN_STOCK")
+  lastOrderDate DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  hospital Hospital?       @relation(fields: [hospitalId], references: [id])
+  branch   HospitalBranch? @relation(fields: [branchId], references: [id])
+
+  @@map("medical_supplies")
+}
+
 model AdmissionStatistics {
-  id           String   @id @default(cuid())
-  departmentId String
-  date         DateTime @default(now())
-  totalAdmissions Int   @default(0)
-  totalDischarges Int  @default(0)
-  averageLOS      Float @default(0) // Length of stay
-  bedOccupancyRate Float @default(0)
-  readmissionRate  Float @default(0)
-  department   Department @relation(fields: [departmentId], references: [id])
+  id               String     @id @default(cuid())
+  departmentId     String
+  date             DateTime   @default(now())
+  totalAdmissions  Int        @default(0)
+  totalDischarges  Int        @default(0)
+  averageLOS       Float      @default(0) // Length of stay
+  bedOccupancyRate Float      @default(0)
+  readmissionRate  Float      @default(0)
+  department       Department @relation(fields: [departmentId], references: [id])
+
   @@map("admission_statistics")
 }
 
@@ -1378,36 +1706,38 @@ model PatientAccessLog {
   accessTime DateTime @default(now())
   patient    Patient  @relation(fields: [patientId], references: [id])
   user       User     @relation(fields: [userId], references: [id])
+
   @@map("patient_access_logs")
 }
 
 model Teleconsultation {
-  id           String   @id @default(cuid())
-  patientId    String
-  doctorId     String?
-  appointmentId String? @unique
-  date         DateTime @default(now())
-  notes        String?
-  patient      Patient  @relation(fields: [patientId], references: [id])
-  doctor       Doctor?  @relation(fields: [doctorId], references: [id])
-  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
+  id            String       @id @default(cuid())
+  patientId     String
+  doctorId      String?
+  appointmentId String?      @unique
+  date          DateTime     @default(now())
+  notes         String?
+  patient       Patient      @relation(fields: [patientId], references: [id])
+  doctor        Doctor?      @relation(fields: [doctorId], references: [id])
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+
   @@map("teleconsultations")
 }
 
 model QueueConfiguration {
-  id                    String   @id @default(cuid())
-  queueId               String   @unique
-  maxCapacity           Int?     @default(50)
-  allowWalkIns          Boolean  @default(true)
-  estimatedServiceTime  Int?     @default(15) // in minutes
-  priorityLevels        String[] @default(["LOW", "MEDIUM", "HIGH", "URGENT"])
-  autoAssignment        Boolean  @default(false)
-  notificationSettings  Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  
-  queue                 Queue    @relation(fields: [queueId], references: [id])
-  
+  id                   String   @id @default(cuid())
+  queueId              String   @unique
+  maxCapacity          Int?     @default(50)
+  allowWalkIns         Boolean  @default(true)
+  estimatedServiceTime Int?     @default(15) // in minutes
+  priorityLevels       String[] @default(["LOW", "MEDIUM", "HIGH", "URGENT"])
+  autoAssignment       Boolean  @default(false)
+  notificationSettings Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  queue Queue @relation(fields: [queueId], references: [id])
+
   @@map("queue_configurations")
 }
 
@@ -1458,28 +1788,28 @@ enum MedicationForm {
 
 // Missing models
 model HospitalSettings {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   hospitalId String
-  hospital   Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   key        String
   value      String
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   @@unique([hospitalId, key])
 }
 
 model HospitalEmergencyContact {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   hospitalId String
-  hospital   Hospital  @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   name       String
   phone      String
   email      String?
   role       String
-  isActive   Boolean   @default(true)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model LabTest {
@@ -1506,31 +1836,31 @@ model LabTest {
 }
 
 model GeneralSign {
-  id            String    @id @default(cuid())
-  patientId     String
-  patient       Patient   @relation(fields: [patientId], references: [id])
-  consultationId String?
-  consultation  Consultation? @relation(fields: [consultationId], references: [id])
-  nurseId       String?
-  nurse         User?     @relation("NurseGeneralSigns", fields: [nurseId], references: [id])
-  admissionId   String?
-  admission     Admission? @relation(fields: [admissionId], references: [id])
-  temperature   Float?
-  respirationRate Int?
-  oxygenSaturation Float?
-  bloodPressureSystolic Int?
+  id                     String        @id @default(cuid())
+  patientId              String
+  patient                Patient       @relation(fields: [patientId], references: [id])
+  consultationId         String?
+  consultation           Consultation? @relation(fields: [consultationId], references: [id])
+  nurseId                String?
+  nurse                  User?         @relation("NurseGeneralSigns", fields: [nurseId], references: [id])
+  admissionId            String?
+  admission              Admission?    @relation(fields: [admissionId], references: [id])
+  temperature            Float?
+  respirationRate        Int?
+  oxygenSaturation       Float?
+  bloodPressureSystolic  Int?
   bloodPressureDiastolic Int?
-  heartRate     Int?
-  weight        Float?
-  height        Float?
-  bmi           Float?
-  painLevel     Int?
-  consciousness String?
-  mobility      String?
-  notes         String?
-  recordedAt    DateTime? @default(now())
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  heartRate              Int?
+  weight                 Float?
+  height                 Float?
+  bmi                    Float?
+  painLevel              Int?
+  consciousness          String?
+  mobility               String?
+  notes                  String?
+  recordedAt             DateTime?     @default(now())
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
 }
 
 enum LabTestStatus {

@@ -1,79 +1,69 @@
 import { db } from "@/db/db";
 import { Request, Response } from "express";
-import { MedicationCreateProps, MedicationUpdateProps, TypedRequestBody } from "@/types";
-//import slugify from "slugify";
+import { TypedRequestBody } from "@/types";
+
+type MedicationBody = {
+  name: string;
+  form?: string | null;
+  stock?: number | null;
+  supplierId?: string | null;
+  hospitalId?: string | null;
+};
 
 /**
- * Crée un nouveau médicament
+ * Crée un nouveau médicament (aligné sur le schéma Prisma actuel)
  */
 export async function createMedication(
-  req: TypedRequestBody<MedicationCreateProps>,
+  req: TypedRequestBody<MedicationBody>,
   res: Response
 ) {
   try {
     const data = req.body;
 
-    // Vérifier si le médicament existe déjà
+    if (!data.name?.trim()) {
+      return res.status(400).json({
+        data: null,
+        error: "Le nom du médicament est requis",
+      });
+    }
+
     const existingMedication = await db.medication.findFirst({
       where: {
         name: data.name,
-        form: data.form
-      }
+        form: data.form ?? undefined,
+      },
     });
 
     if (existingMedication) {
       return res.status(400).json({
         data: null,
-        error: "Un médicament avec ce nom et cette forme existe déjà"
+        error: "Un médicament avec ce nom et cette forme existe déjà",
       });
     }
 
-    // Calculer le prix de vente si non fourni
-    if (!data.sellingPrice && data.purchasePrice && data.markupPercentage) {
-      data.sellingPrice = data.purchasePrice * (1 + data.markupPercentage / 100);
-    }
-
-    // Préparer les données pour la création
-    const createData = {
-      name: data.name,
-      genericName: data.genericName,
-      form: data.form,
-      strength: data.strength,
-      manufacturer: data.manufacturer,
-      description: data.description,
-      sideEffects: data.sideEffects,
-      contraindications: data.contraindications,
-      stock: data.stock,
-      unitPrice: data.unitPrice,
-      purchasePrice: data.purchasePrice,
-      markupPercentage: data.markupPercentage,
-      sellingPrice: data.sellingPrice,
-      discountable: data.discountable,
-      taxable: data.taxable,
-      taxRate: data.taxRate || 0,
-      ...(data.categoryId && {
-        category: {
-          connect: { id: data.categoryId }
-        }
-      })
-    };    const newMedication = await db.medication.create({
-      data: createData,
+    const newMedication = await db.medication.create({
+      data: {
+        name: data.name.trim(),
+        form: data.form || null,
+        stock: data.stock ?? 0,
+        supplierId: data.supplierId || null,
+        hospitalId: data.hospitalId || null,
+      },
       include: {
         supplier: true,
-        hospital: true
-      }
+        hospital: true,
+      },
     });
 
     return res.status(201).json({
       data: newMedication,
-      error: null
+      error: null,
     });
-
   } catch (error) {
     console.error("Error creating medication:", error);
     return res.status(500).json({
       data: null,
-      error: "Erreur lors de la création du médicament"
+      error: "Erreur lors de la création du médicament",
     });
   }
 }
@@ -83,48 +73,39 @@ export async function createMedication(
  */
 export async function getMedications(req: Request, res: Response) {
   try {
-    const { 
-      category,
+    const {
       search,
       inStock,
       sort = "name",
       order = "asc",
       page = 1,
-      limit = 10
+      limit = 100,
     } = req.query;
 
     const skip = (Number(page) - 1) * Number(limit);
-
-    // Construction du filtre
-    let where = {};
-    
-    if (category) {
-      where = { ...where, categoryId: category };
-    }
+    const where: Record<string, unknown> = {};
 
     if (search) {
-      where = {
-        ...where,
-        OR: [
-          { name: { contains: search as string, mode: 'insensitive' } },
-          { genericName: { contains: search as string, mode: 'insensitive' } }
-        ]
-      };
+      where.name = { contains: search as string, mode: "insensitive" };
     }
 
-    if (inStock === 'true') {
-      where = { ...where, stock: { gt: 0 } };
+    if (inStock === "true") {
+      where.stock = { gt: 0 };
     }
+
+    const allowedSort = ["name", "stock", "id"];
+    const sortField = allowedSort.includes(String(sort)) ? String(sort) : "name";
+    const sortOrder = order === "desc" ? "desc" : "asc";
 
     const medications = await db.medication.findMany({
       where,
       include: {
-       // category: true,
-        supplier: true
+        supplier: true,
+        hospital: true,
       },
-      orderBy: { [sort as string]: order },
+      orderBy: { [sortField]: sortOrder },
       skip,
-      take: Number(limit)
+      take: Number(limit),
     });
 
     const total = await db.medication.count({ where });
@@ -136,17 +117,16 @@ export async function getMedications(req: Request, res: Response) {
           total,
           page: Number(page),
           limit: Number(limit),
-          totalPages: Math.ceil(total / Number(limit))
-        }
+          totalPages: Math.ceil(total / Number(limit)),
+        },
       },
-      error: null
+      error: null,
     });
-
   } catch (error) {
     console.error("Error fetching medications:", error);
     return res.status(500).json({
       data: null,
-      error: "Erreur lors de la récupération des médicaments"
+      error: "Erreur lors de la récupération des médicaments",
     });
   }
 }
@@ -156,41 +136,33 @@ export async function getMedications(req: Request, res: Response) {
  */
 export async function getMedicationById(req: Request, res: Response) {
   try {
-    const { id } = req.params;    const medication = await db.medication.findUnique({
+    const { id } = req.params;
+    const medication = await db.medication.findUnique({
       where: { id },
       include: {
         supplier: true,
         hospital: true,
-        prescriptionMedications: {
-          include: {
-            prescription: {
-              include: {
-                patient: true,
-                doctor: true
-              }
-            }
-          }
-        }
-      }
+        prescriptionMedications: true,
+        administrations: true,
+      },
     });
 
     if (!medication) {
       return res.status(404).json({
         data: null,
-        error: "Médicament non trouvé"
+        error: "Médicament non trouvé",
       });
     }
 
     return res.status(200).json({
       data: medication,
-      error: null
+      error: null,
     });
-
   } catch (error) {
     console.error("Error fetching medication:", error);
     return res.status(500).json({
       data: null,
-      error: "Erreur lors de la récupération du médicament"
+      error: "Erreur lors de la récupération du médicament",
     });
   }
 }
@@ -199,47 +171,49 @@ export async function getMedicationById(req: Request, res: Response) {
  * Met à jour un médicament
  */
 export async function updateMedication(
-  req: TypedRequestBody<MedicationUpdateProps>,
+  req: TypedRequestBody<Partial<MedicationBody>>,
   res: Response
 ) {
   try {
     const { id } = req.params;
     const data = req.body;
 
-    // Vérifier si le médicament existe
     const existingMedication = await db.medication.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!existingMedication) {
       return res.status(404).json({
         data: null,
-        error: "Médicament non trouvé"
+        error: "Médicament non trouvé",
       });
     }
 
-    // Recalculer le prix de vente si nécessaire
-    if (data.purchasePrice && data.markupPercentage) {
-      data.sellingPrice = data.purchasePrice * (1 + data.markupPercentage / 100);
-    }    const updatedMedication = await db.medication.update({
+    const updateData: Record<string, unknown> = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.form !== undefined) updateData.form = data.form;
+    if (data.stock !== undefined) updateData.stock = data.stock;
+    if (data.supplierId !== undefined) updateData.supplierId = data.supplierId;
+    if (data.hospitalId !== undefined) updateData.hospitalId = data.hospitalId;
+
+    const updatedMedication = await db.medication.update({
       where: { id },
-      data,
+      data: updateData,
       include: {
         supplier: true,
-        hospital: true
-      }
+        hospital: true,
+      },
     });
 
     return res.status(200).json({
       data: updatedMedication,
-      error: null
+      error: null,
     });
-
   } catch (error) {
     console.error("Error updating medication:", error);
     return res.status(500).json({
       data: null,
-      error: "Erreur lors de la mise à jour du médicament"
+      error: "Erreur lors de la mise à jour du médicament",
     });
   }
 }
@@ -249,44 +223,46 @@ export async function updateMedication(
  */
 export async function deleteMedication(req: Request, res: Response) {
   try {
-    const { id } = req.params;    // Vérifier si le médicament existe
+    const { id } = req.params;
     const medication = await db.medication.findUnique({
       where: { id },
       include: {
         prescriptionMedications: true,
-        administrations: true
-      }
+        administrations: true,
+      },
     });
 
     if (!medication) {
       return res.status(404).json({
         data: null,
-        error: "Médicament non trouvé"
+        error: "Médicament non trouvé",
       });
     }
 
-    // Vérifier si le médicament est utilisé
-    if (medication.prescriptionMedications.length > 0 || medication.administrations.length > 0) {
+    if (
+      medication.prescriptionMedications.length > 0 ||
+      medication.administrations.length > 0
+    ) {
       return res.status(400).json({
         data: null,
-        error: "Impossible de supprimer ce médicament car il est utilisé dans des prescriptions ou administrations"
+        error:
+          "Impossible de supprimer ce médicament car il est utilisé dans des prescriptions ou administrations",
       });
     }
 
     await db.medication.delete({
-      where: { id }
+      where: { id },
     });
 
     return res.status(200).json({
       data: "Médicament supprimé avec succès",
-      error: null
+      error: null,
     });
-
   } catch (error) {
     console.error("Error deleting medication:", error);
     return res.status(500).json({
       data: null,
-      error: "Erreur lors de la suppression du médicament"
+      error: "Erreur lors de la suppression du médicament",
     });
   }
 }
@@ -297,16 +273,16 @@ export async function deleteMedication(req: Request, res: Response) {
 export async function adjustMedicationStock(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { adjustment, reason } = req.body;
+    const { adjustment } = req.body;
 
     const medication = await db.medication.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!medication) {
       return res.status(404).json({
         data: null,
-        error: "Médicament non trouvé"
+        error: "Médicament non trouvé",
       });
     }
 
@@ -314,23 +290,20 @@ export async function adjustMedicationStock(req: Request, res: Response) {
       where: { id },
       data: {
         stock: {
-          increment: adjustment
-        }
-      }
+          increment: Number(adjustment) || 0,
+        },
+      },
     });
-
-    // Ici vous pourriez aussi enregistrer l'ajustement dans un historique
 
     return res.status(200).json({
       data: updatedMedication,
-      error: null
+      error: null,
     });
-
   } catch (error) {
     console.error("Error adjusting medication stock:", error);
     return res.status(500).json({
       data: null,
-      error: "Erreur lors de l'ajustement du stock"
+      error: "Erreur lors de l'ajustement du stock",
     });
   }
 }

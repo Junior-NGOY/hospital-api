@@ -18,45 +18,50 @@ exports.adjustMedicationStock = adjustMedicationStock;
 const db_1 = require("../db/db");
 function createMedication(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c;
         try {
             const data = req.body;
+            if (!((_a = data.name) === null || _a === void 0 ? void 0 : _a.trim())) {
+                return res.status(400).json({
+                    data: null,
+                    error: "Le nom du médicament est requis",
+                });
+            }
             const existingMedication = yield db_1.db.medication.findFirst({
                 where: {
                     name: data.name,
-                    form: data.form
-                }
+                    form: (_b = data.form) !== null && _b !== void 0 ? _b : undefined,
+                },
             });
             if (existingMedication) {
                 return res.status(400).json({
                     data: null,
-                    error: "Un médicament avec ce nom et cette forme existe déjà"
+                    error: "Un médicament avec ce nom et cette forme existe déjà",
                 });
             }
-            if (!data.sellingPrice && data.purchasePrice && data.markupPercentage) {
-                data.sellingPrice = data.purchasePrice * (1 + data.markupPercentage / 100);
-            }
-            const createData = Object.assign({ name: data.name, genericName: data.genericName, form: data.form, strength: data.strength, manufacturer: data.manufacturer, description: data.description, sideEffects: data.sideEffects, contraindications: data.contraindications, stock: data.stock, unitPrice: data.unitPrice, purchasePrice: data.purchasePrice, markupPercentage: data.markupPercentage, sellingPrice: data.sellingPrice, discountable: data.discountable, taxable: data.taxable, taxRate: data.taxRate || 0 }, (data.categoryId && {
-                category: {
-                    connect: { id: data.categoryId }
-                }
-            }));
             const newMedication = yield db_1.db.medication.create({
-                data: createData,
+                data: {
+                    name: data.name.trim(),
+                    form: data.form || null,
+                    stock: (_c = data.stock) !== null && _c !== void 0 ? _c : 0,
+                    supplierId: data.supplierId || null,
+                    hospitalId: data.hospitalId || null,
+                },
                 include: {
                     supplier: true,
-                    hospital: true
-                }
+                    hospital: true,
+                },
             });
             return res.status(201).json({
                 data: newMedication,
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.error("Error creating medication:", error);
             return res.status(500).json({
                 data: null,
-                error: "Erreur lors de la création du médicament"
+                error: "Erreur lors de la création du médicament",
             });
         }
     });
@@ -64,29 +69,27 @@ function createMedication(req, res) {
 function getMedications(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const { category, search, inStock, sort = "name", order = "asc", page = 1, limit = 10 } = req.query;
+            const { search, inStock, sort = "name", order = "asc", page = 1, limit = 100, } = req.query;
             const skip = (Number(page) - 1) * Number(limit);
-            let where = {};
-            if (category) {
-                where = Object.assign(Object.assign({}, where), { categoryId: category });
-            }
+            const where = {};
             if (search) {
-                where = Object.assign(Object.assign({}, where), { OR: [
-                        { name: { contains: search, mode: 'insensitive' } },
-                        { genericName: { contains: search, mode: 'insensitive' } }
-                    ] });
+                where.name = { contains: search, mode: "insensitive" };
             }
-            if (inStock === 'true') {
-                where = Object.assign(Object.assign({}, where), { stock: { gt: 0 } });
+            if (inStock === "true") {
+                where.stock = { gt: 0 };
             }
+            const allowedSort = ["name", "stock", "id"];
+            const sortField = allowedSort.includes(String(sort)) ? String(sort) : "name";
+            const sortOrder = order === "desc" ? "desc" : "asc";
             const medications = yield db_1.db.medication.findMany({
                 where,
                 include: {
-                    supplier: true
+                    supplier: true,
+                    hospital: true,
                 },
-                orderBy: { [sort]: order },
+                orderBy: { [sortField]: sortOrder },
                 skip,
-                take: Number(limit)
+                take: Number(limit),
             });
             const total = yield db_1.db.medication.count({ where });
             return res.status(200).json({
@@ -96,17 +99,17 @@ function getMedications(req, res) {
                         total,
                         page: Number(page),
                         limit: Number(limit),
-                        totalPages: Math.ceil(total / Number(limit))
-                    }
+                        totalPages: Math.ceil(total / Number(limit)),
+                    },
                 },
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.error("Error fetching medications:", error);
             return res.status(500).json({
                 data: null,
-                error: "Erreur lors de la récupération des médicaments"
+                error: "Erreur lors de la récupération des médicaments",
             });
         }
     });
@@ -120,34 +123,26 @@ function getMedicationById(req, res) {
                 include: {
                     supplier: true,
                     hospital: true,
-                    prescriptionMedications: {
-                        include: {
-                            prescription: {
-                                include: {
-                                    patient: true,
-                                    doctor: true
-                                }
-                            }
-                        }
-                    }
-                }
+                    prescriptionMedications: true,
+                    administrations: true,
+                },
             });
             if (!medication) {
                 return res.status(404).json({
                     data: null,
-                    error: "Médicament non trouvé"
+                    error: "Médicament non trouvé",
                 });
             }
             return res.status(200).json({
                 data: medication,
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.error("Error fetching medication:", error);
             return res.status(500).json({
                 data: null,
-                error: "Erreur lors de la récupération du médicament"
+                error: "Erreur lors de la récupération du médicament",
             });
         }
     });
@@ -158,35 +153,43 @@ function updateMedication(req, res) {
             const { id } = req.params;
             const data = req.body;
             const existingMedication = yield db_1.db.medication.findUnique({
-                where: { id }
+                where: { id },
             });
             if (!existingMedication) {
                 return res.status(404).json({
                     data: null,
-                    error: "Médicament non trouvé"
+                    error: "Médicament non trouvé",
                 });
             }
-            if (data.purchasePrice && data.markupPercentage) {
-                data.sellingPrice = data.purchasePrice * (1 + data.markupPercentage / 100);
-            }
+            const updateData = {};
+            if (data.name !== undefined)
+                updateData.name = data.name;
+            if (data.form !== undefined)
+                updateData.form = data.form;
+            if (data.stock !== undefined)
+                updateData.stock = data.stock;
+            if (data.supplierId !== undefined)
+                updateData.supplierId = data.supplierId;
+            if (data.hospitalId !== undefined)
+                updateData.hospitalId = data.hospitalId;
             const updatedMedication = yield db_1.db.medication.update({
                 where: { id },
-                data,
+                data: updateData,
                 include: {
                     supplier: true,
-                    hospital: true
-                }
+                    hospital: true,
+                },
             });
             return res.status(200).json({
                 data: updatedMedication,
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.error("Error updating medication:", error);
             return res.status(500).json({
                 data: null,
-                error: "Erreur lors de la mise à jour du médicament"
+                error: "Erreur lors de la mise à jour du médicament",
             });
         }
     });
@@ -199,34 +202,35 @@ function deleteMedication(req, res) {
                 where: { id },
                 include: {
                     prescriptionMedications: true,
-                    administrations: true
-                }
+                    administrations: true,
+                },
             });
             if (!medication) {
                 return res.status(404).json({
                     data: null,
-                    error: "Médicament non trouvé"
+                    error: "Médicament non trouvé",
                 });
             }
-            if (medication.prescriptionMedications.length > 0 || medication.administrations.length > 0) {
+            if (medication.prescriptionMedications.length > 0 ||
+                medication.administrations.length > 0) {
                 return res.status(400).json({
                     data: null,
-                    error: "Impossible de supprimer ce médicament car il est utilisé dans des prescriptions ou administrations"
+                    error: "Impossible de supprimer ce médicament car il est utilisé dans des prescriptions ou administrations",
                 });
             }
             yield db_1.db.medication.delete({
-                where: { id }
+                where: { id },
             });
             return res.status(200).json({
                 data: "Médicament supprimé avec succès",
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.error("Error deleting medication:", error);
             return res.status(500).json({
                 data: null,
-                error: "Erreur lors de la suppression du médicament"
+                error: "Erreur lors de la suppression du médicament",
             });
         }
     });
@@ -235,34 +239,34 @@ function adjustMedicationStock(req, res) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             const { id } = req.params;
-            const { adjustment, reason } = req.body;
+            const { adjustment } = req.body;
             const medication = yield db_1.db.medication.findUnique({
-                where: { id }
+                where: { id },
             });
             if (!medication) {
                 return res.status(404).json({
                     data: null,
-                    error: "Médicament non trouvé"
+                    error: "Médicament non trouvé",
                 });
             }
             const updatedMedication = yield db_1.db.medication.update({
                 where: { id },
                 data: {
                     stock: {
-                        increment: adjustment
-                    }
-                }
+                        increment: Number(adjustment) || 0,
+                    },
+                },
             });
             return res.status(200).json({
                 data: updatedMedication,
-                error: null
+                error: null,
             });
         }
         catch (error) {
             console.error("Error adjusting medication stock:", error);
             return res.status(500).json({
                 data: null,
-                error: "Erreur lors de l'ajustement du stock"
+                error: "Erreur lors de l'ajustement du stock",
             });
         }
     });

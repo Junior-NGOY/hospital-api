@@ -12,10 +12,7 @@ const connections = [
   "postgresql://neondb_owner:DoT8Wxv4KpSt@ep-cool-fire-a5efc9dk-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require",
   
   // URL AWS sans pooler
-  "postgresql://neondb_owner:DoT8Wxv4KpSt@ep-cool-fire-a5efc9dk.us-east-2.aws.neon.tech:5432/neondb?sslmode=require",
-  
-  // URL AWS avec base masomoProDB
-  "postgresql://neondb_owner:DoT8Wxv4KpSt@ep-cool-fire-a5efc9dk-pooler.us-east-2.aws.neon.tech/masomoProDB?sslmode=require"
+  "postgresql://neondb_owner:DoT8Wxv4KpSt@ep-cool-fire-a5efc9dk.us-east-2.aws.neon.tech:5432/neondb?sslmode=require"
 ];
 
 async function testConnection(url, index) {

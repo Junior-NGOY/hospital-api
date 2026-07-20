@@ -8,4 +8,7 @@ const express_1 = __importDefault(require("express"));
 const departmentRouter = express_1.default.Router();
 departmentRouter.post("/departments", departments_1.createDepartment);
 departmentRouter.get("/departments", departments_1.getDepartments);
+departmentRouter.get("/departments/:id", departments_1.getDepartmentById);
+departmentRouter.put("/departments/:id", departments_1.updateDepartment);
+departmentRouter.delete("/departments/:id", departments_1.deleteDepartment);
 exports.default = departmentRouter;

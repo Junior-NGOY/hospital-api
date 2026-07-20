@@ -55,10 +55,10 @@ export type ConsultationCreateProps = {
   fullName: string;
   email: string;
   phone: string;
-  school: string;
+  hospital: string;
   country: string;
-  schoolPage: string;
-  students: number;
+  hospitalPage: string;
+  bedCount: number;
   role: string;
   media: string;
   message: string;
@@ -67,76 +67,9 @@ export type ConsultationCreateProps = {
 export type departmentCreateProps = {
   name: string;
   slug: string;
-  schoolId: string;
-};
-export type StreamCreateProps = {
-  title: string;
-  slug: string;
-  classId: string;
-  schoolId: string;
-};
-export type ParentCreateProps = {
-  title: string;
-  firstname: string;
-  lastname: string;
-  relationship: string;
-  email: string;
-  NIN: string;
-  gender: string;
-  dob: string;
-  phone: string;
-  nationality: string;
-  whatsappNo: string;
-  imageUrl: string;
-  contactMethod: string;
-  occupation: string;
-  address: string;
-  password: string;
-  schoolId: string;
-  userId: string;
+  hospitalId: string;
 };
 
-export type SubjectCreateProps = {
-  name: string;
-  slug: string;
-  code: string;
-  shortName: string;
-  category: SubjectCategory;
-  type: SubjectType;
-  departmentId: string;
-  departmentName: string;
-};
-
-export type TeacherCreateProps = {
-  title: string;
-  employeeId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  whatsappNo: string;
-  nationality: string;
-  NIN: string;
-  gender: Gender;
-  dateOfBirth: string;
-  contactMethod: string;
-  password: string;
-  dateOfJoining: string;
-  designation: string;
-  departmentId: string;
-  departmentName: string;
-  qualification: string;
-  mainSubject: string;
-  mainSubjectId: string;
-  subjects: string[];
-  classIds: string[];
-  classes: string[];
-  imageUrl: string;
-  experience: number;
-  address: string;
-  schoolId: string;
-  userId: string;
-};
 export type UserCreateProps = {
   email: string;
   password: string;
@@ -144,8 +77,8 @@ export type UserCreateProps = {
   name: string;
   phone?: string;
   image?: string;
-  schoolId?: string;
-  schoolName?: string;
+  hospitalId?: string;
+  hospitalName?: string;
 };
 export type UserLoginProps = {
   email: string;

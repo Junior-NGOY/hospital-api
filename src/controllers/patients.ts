@@ -27,73 +27,111 @@ import { Request, Response } from "express";
  * Crée un nouveau patient dans le système
  */
 export async function createPatient(
-  req: TypedRequestBody<PatientCreateProps>,
+  req: TypedRequestBody<PatientCreateProps & Record<string, unknown>>,
   res: Response
 ) {
   const data = req.body;
-  
+  const body = data as PatientCreateProps & {
+    regNo?: string;
+    phoneNumber?: string;
+    maritalStatut?: string;
+  };
+
   try {
-    // Vérifier si un patient avec le même numéro de dossier existe déjà
-    if (data.fileNumber) {
-      const existingPatient = await db.patient.findUnique({
-        where: { fileNumber: data.fileNumber }
+    const fileNumber =
+      body.fileNumber || body.regNo || `HOPE/IND/${new Date().getFullYear()}/0001`;
+    const phone = body.phone || body.phoneNumber || null;
+    const maritalStatus =
+      body.maritalStatus ||
+      (body.maritalStatut as PatientCreateProps["maritalStatus"]) ||
+      undefined;
+    const firstName = body.firstName || body.name?.split(" ")[0] || "Patient";
+    const lastName =
+      body.lastName || body.name?.split(" ").slice(1).join(" ") || firstName;
+    const name = body.name || `${firstName} ${lastName}`.trim();
+    const rawCategory = (body.category as string) || "PRIVATE";
+    const category =
+      rawCategory === "INDIVIDUAL" || rawCategory === "IND"
+        ? "PRIVATE"
+        : rawCategory === "SUS" || rawCategory === "SUBSCRIBER"
+          ? "SUBSCRIBER"
+          : rawCategory === "PRIVATE" || rawCategory === "SUBSCRIBER"
+            ? rawCategory
+            : "PRIVATE";
+
+    const existingPatient = await db.patient.findUnique({
+      where: { fileNumber },
+    });
+
+    if (existingPatient) {
+      return res.status(409).json({
+        data: null,
+        error: "Un patient avec ce numéro de dossier existe déjà",
       });
-      
-      if (existingPatient) {
-        return res.status(409).json({
-          data: null,
-          error: "Un patient avec ce numéro de dossier existe déjà"
-        });
-      }
     }
-    
-    // Créer le nouveau patient
+
     const patient = await db.patient.create({
       data: {
-        fileNumber: data.fileNumber,
-        title: data.title,
-        name:data.name,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        dateOfBirth: new Date(data.dateOfBirth),
-        gender: data.gender,
-        address: data.address,
-        admissionDate: convertDateToIso(data.admissionDate),
-        maritalStatus: data.maritalStatus,
-        nationality: data.nationality,
-        profession: data.profession,
-        phone: data.phone,
-        email: data.email,
-        bloodType: data.bloodType,
-        emergencyContact: data.emergencyContact,
-        category: data.category || 'PRIVATE'
-      }
+        fileNumber,
+        title: body.title,
+        name,
+        firstName,
+        lastName,
+        dateOfBirth: new Date(body.dateOfBirth),
+        gender: body.gender,
+        address: body.address,
+        admissionDate: body.admissionDate
+          ? (() => {
+              try {
+                return convertDateToIso(
+                  String(body.admissionDate).slice(0, 10)
+                );
+              } catch {
+                return new Date(body.admissionDate);
+              }
+            })()
+          : new Date(),
+        maritalStatus,
+        nationality: body.nationality,
+        profession: body.profession,
+        phone,
+        email: body.email,
+        bloodType: body.bloodType,
+        emergencyContact: body.emergencyContact,
+        category,
+      },
     });
-    
+
     return res.status(201).json({
       data: patient,
-      error: null
+      error: null,
     });
   } catch (error) {
     console.log(error);
     return res.status(500).json({
       data: null,
-      error: "Something went wrong"
+      error: "Something went wrong",
     });
   }
 }
 
 /**
- * Récupère les détails d'un patient spécifique par son ID
+ * Récupère les détails d'un patient spécifique par son ID ou fileNumber
  */
 export async function getPatientById(req: Request, res: Response) {
-  const { patientId } = req.params;
+  const patientId = (req.params.id || req.params.patientId) as string;
   
   try {
-    // Récupérer le patient
-    const patient = await db.patient.findUnique({
+    // Récupérer le patient par id ou numéro de dossier
+    let patient = await db.patient.findUnique({
       where: { id: patientId }
     });
+
+    if (!patient) {
+      patient = await db.patient.findUnique({
+        where: { fileNumber: patientId }
+      });
+    }
     
     if (!patient) {
       return res.status(404).json({
@@ -101,10 +139,12 @@ export async function getPatientById(req: Request, res: Response) {
         error: "Patient not found"
       });
     }
+
+    const resolvedPatientId = patient.id;
     
     // Récupérer les entrées récentes dans les files d'attente
     const recentQueueEntries = await db.queueEntry.findMany({
-      where: { patientId },
+      where: { patientId: resolvedPatientId },
       include: {
         queue: true,
     /*     assignedTo: {
@@ -121,7 +161,7 @@ export async function getPatientById(req: Request, res: Response) {
     
     // Récupérer les consultations récentes
     const recentConsultations = await db.consultation.findMany({
-      where: { patientId },
+      where: { patientId: resolvedPatientId },
       include: {
         doctor: {
           include: {
@@ -135,13 +175,13 @@ export async function getPatientById(req: Request, res: Response) {
     
     // Récupérer les allergies du patient
     const allergies = await db.patientAllergy.findMany({
-      where: { patientId },
+      where: { patientId: resolvedPatientId },
      
     });
     
     // Récupérer l'historique médical
     const medicalHistories = await db.medicalHistory.findMany({
-      where: { patientId },
+      where: { patientId: resolvedPatientId },
       //orderBy: { createdAt: 'desc' }
     });
     
@@ -200,11 +240,20 @@ export async function getPatientById(req: Request, res: Response) {
  * Met à jour les informations d'un patient existant
  */
 export async function updatePatient(
-  req: TypedRequestBody<PatientUpdateProps>,
+  req: TypedRequestBody<PatientUpdateProps & Record<string, unknown>>,
   res: Response
 ) {
-  const { patientId } = req.params;
-  const data = req.body;
+  const patientId = (req.params.id || req.params.patientId) as string;
+  const data = req.body as PatientUpdateProps & {
+    phoneNumber?: string;
+    regNo?: string;
+    title?: string;
+    name?: string;
+    nationality?: string;
+    profession?: string;
+    maritalStatus?: string;
+    admissionDate?: string;
+  };
   
   try {
     // Vérifier si le patient existe
@@ -218,11 +267,14 @@ export async function updatePatient(
         error: "Patient not found"
       });
     }
+
+    const fileNumber = data.fileNumber || data.regNo;
+    const phone = data.phone !== undefined ? data.phone : data.phoneNumber;
     
     // Vérifier si le numéro de dossier est déjà utilisé par un autre patient
-    if (data.fileNumber && data.fileNumber !== existingPatient.fileNumber) {
+    if (fileNumber && fileNumber !== existingPatient.fileNumber) {
       const patientWithFileNumber = await db.patient.findUnique({
-        where: { fileNumber: data.fileNumber }
+        where: { fileNumber }
       });
       
       if (patientWithFileNumber && patientWithFileNumber.id !== patientId) {
@@ -234,20 +286,37 @@ export async function updatePatient(
     }
     
     // Préparer les données de mise à jour
-    const updateData: any = {};
+    const updateData: Record<string, unknown> = {};
     
-    // Ajouter uniquement les champs fournis dans la requête
-    if (data.fileNumber !== undefined) updateData.fileNumber = data.fileNumber;
+    if (fileNumber !== undefined) updateData.fileNumber = fileNumber;
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.name !== undefined) updateData.name = data.name;
     if (data.firstName !== undefined) updateData.firstName = data.firstName;
     if (data.lastName !== undefined) updateData.lastName = data.lastName;
     if (data.dateOfBirth !== undefined) updateData.dateOfBirth = new Date(data.dateOfBirth);
     if (data.gender !== undefined) updateData.gender = data.gender;
     if (data.address !== undefined) updateData.address = data.address;
-    if (data.phone !== undefined) updateData.phone = data.phone;
+    if (phone !== undefined) updateData.phone = phone;
     if (data.email !== undefined) updateData.email = data.email;
     if (data.bloodType !== undefined) updateData.bloodType = data.bloodType;
     if (data.emergencyContact !== undefined) updateData.emergencyContact = data.emergencyContact;
-    if (data.category !== undefined) updateData.category = data.category;
+    if (data.category !== undefined) {
+      const raw = data.category as string;
+      updateData.category =
+        raw === "INDIVIDUAL" || raw === "IND" ? "PRIVATE" : raw;
+    }
+    if (data.nationality !== undefined) updateData.nationality = data.nationality;
+    if (data.profession !== undefined) updateData.profession = data.profession;
+    if (data.maritalStatus !== undefined) updateData.maritalStatus = data.maritalStatus;
+    if (data.admissionDate !== undefined) {
+      try {
+        updateData.admissionDate = convertDateToIso(
+          String(data.admissionDate).slice(0, 10)
+        );
+      } catch {
+        updateData.admissionDate = new Date(data.admissionDate);
+      }
+    }
     
     // Mettre à jour le patient
     const updatedPatient = await db.patient.update({
@@ -401,7 +470,7 @@ export async function searchPatients(req: Request, res: Response) {
  * Note: Dans un système médical réel, il est souvent préférable de désactiver un patient plutôt que de le supprimer
  */
 export async function deletePatient(req: Request, res: Response) {
-  const { patientId } = req.params;
+  const patientId = (req.params.id || req.params.patientId) as string;
   
   try {
     // Vérifier si le patient existe
@@ -422,16 +491,10 @@ export async function deletePatient(req: Request, res: Response) {
     });
     
     if (queueEntries.length > 0) {
-      // Option 1: Empêcher la suppression si le patient a des entrées
       return res.status(409).json({
         data: null,
         error: "Ce patient ne peut pas être supprimé car il a des entrées dans les files d'attente"
       });
-      
-      // Option 2: Supprimer également les entrées (décommentez si nécessaire)
-      // await db.queueEntry.deleteMany({
-      //   where: { patientId }
-      // });
     }
     
     // Supprimer le patient

@@ -1,16 +1,17 @@
-import { createDepartment, getDepartments } from "@/controllers/departments";
 import {
-
-} from "@/controllers/nurses";
+  createDepartment,
+  getDepartments,
+  getDepartmentById,
+  updateDepartment,
+  deleteDepartment,
+} from "@/controllers/departments";
 import express from "express";
 const departmentRouter = express.Router();
 
 departmentRouter.post("/departments", createDepartment);
 departmentRouter.get("/departments", getDepartments);
-//departmentRouter.get("/departments/brief", getBriefDepartments);
-//departmentRouter.post("/streams", createStream);
-//departmentRouter.get("/streams", getStreams);
-// adminRouter.get("/customers/:id", getCustomerById);
-// adminRouter.get("/api/v2/customers", getV2Customers);
+departmentRouter.get("/departments/:id", getDepartmentById);
+departmentRouter.put("/departments/:id", updateDepartment);
+departmentRouter.delete("/departments/:id", deleteDepartment);
 
 export default departmentRouter;

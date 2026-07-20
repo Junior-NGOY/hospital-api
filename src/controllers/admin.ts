@@ -1,5 +1,5 @@
 import { db } from "@/db/db";
-import {TypedRequestBody } from "@/types/types";
+import { TypedRequestBody } from "@/types/types";
 import { Request, Response } from "express";
 
 /* export async function createContact(
@@ -7,23 +7,22 @@ import { Request, Response } from "express";
   res: Response
 ) {
   const data = req.body;
-  const { email, school } = data;
+  const { email, hospital } = data;
   try {
-    // Check if the school already exists\
     const existingEmail = await db.contact.findUnique({
       where: {
         email
       }
     });
-    const existingSchool = await db.contact.findUnique({
+    const existingHospital = await db.contact.findUnique({
       where: {
-        school
+        hospital
       }
     });
-    if (existingSchool || existingEmail) {
+    if (existingHospital || existingEmail) {
       return res.status(409).json({
         data: null,
-        error: "We are already received the request for this school and email"
+        error: "We already received a request for this hospital and email"
       });
     }
     const newContact = await db.contact.create({
@@ -56,16 +55,3 @@ import { Request, Response } from "express";
     console.log(error);
   }
 } */
-// export async function getCustomerById(req: Request, res: Response) {
-//   const { id } = req.params;
-//   try {
-//     const customer = await db.customer.findUnique({
-//       where: {
-//         id,
-//       },
-//     });
-//     return res.status(200).json(customer);
-//   } catch (error) {
-//     console.log(error);
-//   }
-// }
