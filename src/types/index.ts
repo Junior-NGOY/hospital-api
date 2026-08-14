@@ -54,10 +54,16 @@ export interface PatientCreateProps {
     bloodType?: 'A_POSITIVE' | 'A_NEGATIVE' | 'B_POSITIVE' | 'B_NEGATIVE' | 'AB_POSITIVE' | 'AB_NEGATIVE' | 'O_POSITIVE' | 'O_NEGATIVE' | null;
     emergencyContact?: string | null;
     category?: 'PRIVATE' | 'SUBSCRIBER' ;
+    hospitalId?: string | null;
+    branchId?: string | null;
+    insuranceName?: string | null;
+    insuranceNumber?: string | null;
   }
   export interface PatientResponse {
     id: string;
     fileNumber: string;
+    hospitalId?: string | null;
+    branchId?: string | null;
     firstName: string;
     lastName: string;
     dateOfBirth: string;
@@ -93,6 +99,8 @@ export interface PatientCreateProps {
     bloodType?: 'A_POSITIVE' | 'A_NEGATIVE' | 'B_POSITIVE' | 'B_NEGATIVE' | 'AB_POSITIVE' | 'AB_NEGATIVE' | 'O_POSITIVE' | 'O_NEGATIVE' | null;
     emergencyContact?: string | null;
     category?: 'PRIVATE' | 'SUBSCRIBER' ;
+    insuranceName?: string | null;
+    insuranceNumber?: string | null;
   }
   // Interface pour ajouter un patient à une file d'attente
     export interface PatientToQueueProps {

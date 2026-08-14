@@ -1,12 +1,24 @@
 import { db } from "@/db/db";
+import { AuthRequest } from "@/middleware/auth";
 import { QueueCreateProps, QueueEntryCreateProps, QueueEntryUpdateProps, QueueUpdateProps, TypedRequestBody } from "@/types";
 import { calculateAge } from "@/utils/calculateAge";
 import { convertDateToIso } from "@/utils/convertDateToIso";
 import { Request, Response } from "express";
 
+const PATIENT_QUEUE_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  dateOfBirth: true,
+  gender: true,
+  phone: true,
+  email: true,
+  fileNumber: true,
+} as const;
+
 // Créer une nouvelle file d'attente
 export async function createQueue(
-  req: TypedRequestBody<QueueCreateProps>,
+  req: AuthRequest & TypedRequestBody<QueueCreateProps>,
   res: Response
 ) {
   const data = req.body;  try {
@@ -22,6 +34,7 @@ export async function createQueue(
         name: data.name,
         description: data.description,
         departmentId: data.departmentId,
+        hospitalId: req.user?.hospitalId ?? undefined,
         isActive: true
       }
     });
@@ -46,7 +59,7 @@ export async function updateQueue(
   req: TypedRequestBody<QueueUpdateProps>,
   res: Response
 ) {
-  const { id } = req.params;
+  const id = req.params.queueId || req.params.id;
   const data = req.body;
   
   try {
@@ -73,7 +86,7 @@ export async function updateQueue(
   }
 }
 export async function deleteQueue(req: Request, res: Response) {
-  const { id } = req.params;
+  const id = req.params.queueId || req.params.id;
   try {
     await db.queue.delete({
       where: { id }
@@ -97,6 +110,23 @@ export async function getQueues(req: Request, res: Response) {
       include: {
         department: true,
         hospital: true,
+        queueConfiguration: true,
+        entries: {
+          where: {
+            status: {
+              in: ['WAITING', 'IN_PROGRESS']
+            }
+          },
+          include: {
+            patient: {
+              select: PATIENT_QUEUE_SELECT
+            }
+          },
+          orderBy: [
+            { priority: 'desc' },
+            { ticketNumber: 'asc' }
+          ]
+        },
         _count: {
           select: {
             entries: true
@@ -127,6 +157,12 @@ export async function addToQueue(
 ) {
   const data = req.body;
   try {
+    if (!data.queueId || !data.patientId) {
+      return res.status(400).json({
+        data: null,
+        error: "queueId et patientId sont requis"
+      });
+    }
     // Trouver le numéro de ticket maximum actuel pour cette file d'attente spécifique
     const maxTicket = await db.queueEntry.findFirst({
       where: { 
@@ -571,6 +607,84 @@ export async function callNextPatient(
   }
 }
 
+export async function callSpecificPatient(
+  req: TypedRequestBody<{ userId: string }>,
+  res: Response
+) {
+  const { entryId } = req.params;
+  const { userId } = req.body;
+
+  try {
+    const existingEntry = await db.queueEntry.findUnique({
+      where: { id: entryId },
+      include: { patient: true, queue: true }
+    });
+
+    if (!existingEntry) {
+      return res.status(404).json({
+        data: null,
+        error: "Queue entry not found"
+      });
+    }
+
+    const user = await db.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "User not found"
+      });
+    }
+
+    const updatedEntry = await db.queueEntry.update({
+      where: { id: entryId },
+      data: {
+        status: "IN_PROGRESS",
+        assignedToId: userId
+      },
+      include: {
+        patient: true,
+        queue: true,
+        assignedTo: true
+      }
+    });
+
+    return res.status(200).json({
+      data: {
+        id: updatedEntry.id,
+        ticketNumber: updatedEntry.ticketNumber,
+        status: updatedEntry.status,
+        priority: updatedEntry.priority,
+        createdAt: updatedEntry.createdAt,
+        patient: {
+          id: updatedEntry.patient.id,
+          name: `${updatedEntry.patient.firstName} ${updatedEntry.patient.lastName}`,
+          phone: updatedEntry.patient.phone,
+          fileNumber: updatedEntry.patient.fileNumber
+        },
+        queue: {
+          id: updatedEntry.queue?.id || "",
+          name: updatedEntry.queue?.name || "Queue inconnue"
+        },
+        assignedTo: updatedEntry.assignedTo
+          ? {
+              id: updatedEntry.assignedTo.id,
+              name: updatedEntry.assignedTo.firstName,
+              role: updatedEntry.assignedTo.role
+            }
+          : null,
+        notes: updatedEntry.notes
+      },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Something went wrong"
+    });
+  }
+}
+
 // Mettre à jour une entrée de file d'attente
 /**
  * Met à jour une entrée dans la file d'attente
@@ -738,7 +852,7 @@ function mapNumberToPriority(priorityNumber: number): 'LOW' | 'NORMAL' | 'HIGH' 
  * Inclut les entrées actives, la configuration et les statistiques
  */
 export async function getQueueById(req: Request, res: Response) {
-  const { queueId } = req.params;
+  const queueId = req.params.queueId || req.params.id;
   
   try {
     // Vérifier si la file d'attente existe
@@ -762,16 +876,7 @@ export async function getQueueById(req: Request, res: Response) {
       where: { queueId },
       include: {
         patient: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            dateOfBirth: true,
-            gender: true,
-            email: true,
-            // Utilisez le nom correct pour le numéro de téléphone si disponible
-            // phone: true,
-          }
+          select: PATIENT_QUEUE_SELECT
         },
         // Utilisez le nom correct de la relation pour l'utilisateur assigné
         // Si c'est assignedTo :
@@ -850,8 +955,8 @@ export async function getQueueById(req: Request, res: Response) {
           gender: entry.patient.gender,
           age: calculateAge(entry.patient.dateOfBirth),
           email: entry.patient.email,
-          // Utilisez le nom correct pour le numéro de téléphone si disponible
-          // phone: entry.patient.phone,
+          phone: entry.patient.phone,
+          fileNumber: entry.patient.fileNumber,
         },
         // Utilisez le nom correct de la relation pour l'utilisateur assigné
         // Si c'est assignedTo :

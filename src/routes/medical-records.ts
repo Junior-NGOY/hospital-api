@@ -28,56 +28,143 @@ import {
   deleteCurrentMedication,
   syncSection,
 } from "@/controllers/medical-records";
+import { authenticate, requireRoles } from "@/middleware/auth";
+import { requirePatientHospital } from "@/utils/hospitalScope";
 
 const medicalRecordRouter = express.Router();
 
-// Aggregate DME
+const writeDme = [
+  authenticate,
+  requireRoles("DOCTOR", "NURSE"),
+  requirePatientHospital,
+] as const;
+
+// P0.8 exception (cartes QR / P2.2): lecture DME publique. Écritures JWT + hospitalId.
+// L’espace patient (P2.2) utilise /patient-portal/* avec une session patient, pas le dashboard.
 medicalRecordRouter.get("/patients/:patientId/medical-record", getMedicalRecord);
 
-// Section sync (replace list)
-medicalRecordRouter.put("/patients/:patientId/medical-record/:section", syncSection);
+medicalRecordRouter.put(
+  "/patients/:patientId/medical-record/:section",
+  ...writeDme,
+  syncSection
+);
 
-// Allergies
-medicalRecordRouter.post("/patients/:patientId/allergies", createAllergy);
-medicalRecordRouter.put("/patients/:patientId/allergies/:id", updateAllergy);
-medicalRecordRouter.delete("/patients/:patientId/allergies/:id", deleteAllergy);
+medicalRecordRouter.post("/patients/:patientId/allergies", ...writeDme, createAllergy);
+medicalRecordRouter.put("/patients/:patientId/allergies/:id", ...writeDme, updateAllergy);
+medicalRecordRouter.delete("/patients/:patientId/allergies/:id", ...writeDme, deleteAllergy);
 
-// Vaccinations
-medicalRecordRouter.post("/patients/:patientId/vaccinations", createVaccination);
-medicalRecordRouter.put("/patients/:patientId/vaccinations/:id", updateVaccination);
-medicalRecordRouter.delete("/patients/:patientId/vaccinations/:id", deleteVaccination);
+medicalRecordRouter.post("/patients/:patientId/vaccinations", ...writeDme, createVaccination);
+medicalRecordRouter.put(
+  "/patients/:patientId/vaccinations/:id",
+  ...writeDme,
+  updateVaccination
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/vaccinations/:id",
+  ...writeDme,
+  deleteVaccination
+);
 
-// Chronic conditions
-medicalRecordRouter.post("/patients/:patientId/chronic-conditions", createChronicCondition);
-medicalRecordRouter.put("/patients/:patientId/chronic-conditions/:id", updateChronicCondition);
-medicalRecordRouter.delete("/patients/:patientId/chronic-conditions/:id", deleteChronicCondition);
+medicalRecordRouter.post(
+  "/patients/:patientId/chronic-conditions",
+  ...writeDme,
+  createChronicCondition
+);
+medicalRecordRouter.put(
+  "/patients/:patientId/chronic-conditions/:id",
+  ...writeDme,
+  updateChronicCondition
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/chronic-conditions/:id",
+  ...writeDme,
+  deleteChronicCondition
+);
 
-// Family history
-medicalRecordRouter.post("/patients/:patientId/family-history", createFamilyHistory);
-medicalRecordRouter.put("/patients/:patientId/family-history/:id", updateFamilyHistory);
-medicalRecordRouter.delete("/patients/:patientId/family-history/:id", deleteFamilyHistory);
+medicalRecordRouter.post(
+  "/patients/:patientId/family-history",
+  ...writeDme,
+  createFamilyHistory
+);
+medicalRecordRouter.put(
+  "/patients/:patientId/family-history/:id",
+  ...writeDme,
+  updateFamilyHistory
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/family-history/:id",
+  ...writeDme,
+  deleteFamilyHistory
+);
 
-// Social history
-medicalRecordRouter.put("/patients/:patientId/social-history", upsertSocialHistory);
+medicalRecordRouter.put(
+  "/patients/:patientId/social-history",
+  ...writeDme,
+  upsertSocialHistory
+);
 
-// Emergency contacts
-medicalRecordRouter.post("/patients/:patientId/emergency-contacts", createEmergencyContact);
-medicalRecordRouter.put("/patients/:patientId/emergency-contacts/:id", updateEmergencyContact);
-medicalRecordRouter.delete("/patients/:patientId/emergency-contacts/:id", deleteEmergencyContact);
+medicalRecordRouter.post(
+  "/patients/:patientId/emergency-contacts",
+  ...writeDme,
+  createEmergencyContact
+);
+medicalRecordRouter.put(
+  "/patients/:patientId/emergency-contacts/:id",
+  ...writeDme,
+  updateEmergencyContact
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/emergency-contacts/:id",
+  ...writeDme,
+  deleteEmergencyContact
+);
 
-// Exam results
-medicalRecordRouter.post("/patients/:patientId/exam-results", createExamResult);
-medicalRecordRouter.put("/patients/:patientId/exam-results/:id", updateExamResult);
-medicalRecordRouter.delete("/patients/:patientId/exam-results/:id", deleteExamResult);
+medicalRecordRouter.post(
+  "/patients/:patientId/exam-results",
+  ...writeDme,
+  createExamResult
+);
+medicalRecordRouter.put(
+  "/patients/:patientId/exam-results/:id",
+  ...writeDme,
+  updateExamResult
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/exam-results/:id",
+  ...writeDme,
+  deleteExamResult
+);
 
-// Medical images
-medicalRecordRouter.post("/patients/:patientId/medical-images", createMedicalImage);
-medicalRecordRouter.put("/patients/:patientId/medical-images/:id", updateMedicalImage);
-medicalRecordRouter.delete("/patients/:patientId/medical-images/:id", deleteMedicalImage);
+medicalRecordRouter.post(
+  "/patients/:patientId/medical-images",
+  ...writeDme,
+  createMedicalImage
+);
+medicalRecordRouter.put(
+  "/patients/:patientId/medical-images/:id",
+  ...writeDme,
+  updateMedicalImage
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/medical-images/:id",
+  ...writeDme,
+  deleteMedicalImage
+);
 
-// Current medications
-medicalRecordRouter.post("/patients/:patientId/current-medications", createCurrentMedication);
-medicalRecordRouter.put("/patients/:patientId/current-medications/:id", updateCurrentMedication);
-medicalRecordRouter.delete("/patients/:patientId/current-medications/:id", deleteCurrentMedication);
+medicalRecordRouter.post(
+  "/patients/:patientId/current-medications",
+  ...writeDme,
+  createCurrentMedication
+);
+medicalRecordRouter.put(
+  "/patients/:patientId/current-medications/:id",
+  ...writeDme,
+  updateCurrentMedication
+);
+medicalRecordRouter.delete(
+  "/patients/:patientId/current-medications/:id",
+  ...writeDme,
+  deleteCurrentMedication
+);
 
 export default medicalRecordRouter;

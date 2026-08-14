@@ -1,13 +1,59 @@
 import { db } from "@/db/db";
+import { AuthRequest } from "@/middleware/auth";
 import { MedicalHistoryProps, PatientAllergyProps, PatientCreateProps, PatientToQueueProps, PatientUpdateProps, TypedRequestBody } from "@/types";
 import { calculateAge } from "@/utils/calculateAge";
 //import { parse } from 'csv-parse';
 import { convertDateToIso } from "@/utils/convertDateToIso";
+import { normalizePatientCategory } from "@/utils/mutuelle";
 import { Request, Response } from "express";
 
- export async function getNextPatientSequence(req: Request, res: Response) {
+/**
+ * Hospital scope from JWT, with DB fallback for tokens issued before P0.3
+ * (no hospitalId claim). Never trust client-supplied hospitalId.
+ */
+async function resolveHospitalScope(req: AuthRequest): Promise<{
+  hospitalId: string | null;
+  branchId: string | null;
+}> {
+  const fromToken = req.user?.hospitalId ?? null;
+  const branchFromToken = req.user?.branchId ?? null;
+  if (fromToken) {
+    return { hospitalId: fromToken, branchId: branchFromToken };
+  }
+  const userId = req.user?.userId;
+  if (!userId) {
+    return { hospitalId: null, branchId: null };
+  }
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { hospitalId: true, branchId: true },
+  });
+  return {
+    hospitalId: user?.hospitalId ?? null,
+    branchId: user?.branchId ?? branchFromToken,
+  };
+}
+
+function denyIfWrongHospital(
+  patient: { hospitalId: string | null },
+  hospitalId: string | null,
+  res: Response
+): boolean {
+  if (!hospitalId || patient.hospitalId !== hospitalId) {
+    res.status(403).json({
+      data: null,
+      error: "Accès refusé",
+    });
+    return true;
+  }
+  return false;
+}
+
+ export async function getNextPatientSequence(req: AuthRequest, res: Response) {
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
     const lastPatient = await db.patient.findFirst({
+      where: hospitalId ? { hospitalId } : { id: "__none__" },
       orderBy: {
         createdAt: "desc"
       }
@@ -27,7 +73,7 @@ import { Request, Response } from "express";
  * Crée un nouveau patient dans le système
  */
 export async function createPatient(
-  req: TypedRequestBody<PatientCreateProps & Record<string, unknown>>,
+  req: AuthRequest & TypedRequestBody<PatientCreateProps & Record<string, unknown>>,
   res: Response
 ) {
   const data = req.body;
@@ -35,9 +81,19 @@ export async function createPatient(
     regNo?: string;
     phoneNumber?: string;
     maritalStatut?: string;
+    insuranceName?: string;
+    insuranceNumber?: string;
+    affiliateNumber?: string;
   };
 
   try {
+    const { hospitalId, branchId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return res.status(400).json({
+        data: null,
+        error: "Aucun hôpital associé au compte. Impossible de créer un patient.",
+      });
+    }
     const fileNumber =
       body.fileNumber || body.regNo || `HOPE/IND/${new Date().getFullYear()}/0001`;
     const phone = body.phone || body.phoneNumber || null;
@@ -49,15 +105,15 @@ export async function createPatient(
     const lastName =
       body.lastName || body.name?.split(" ").slice(1).join(" ") || firstName;
     const name = body.name || `${firstName} ${lastName}`.trim();
-    const rawCategory = (body.category as string) || "PRIVATE";
-    const category =
-      rawCategory === "INDIVIDUAL" || rawCategory === "IND"
-        ? "PRIVATE"
-        : rawCategory === "SUS" || rawCategory === "SUBSCRIBER"
-          ? "SUBSCRIBER"
-          : rawCategory === "PRIVATE" || rawCategory === "SUBSCRIBER"
-            ? rawCategory
-            : "PRIVATE";
+    const category = normalizePatientCategory(body.category);
+    const insuranceName =
+      typeof body.insuranceName === "string" ? body.insuranceName.trim() || null : null;
+    const insuranceNumber =
+      typeof body.insuranceNumber === "string"
+        ? body.insuranceNumber.trim() || null
+        : typeof body.affiliateNumber === "string"
+          ? body.affiliateNumber.trim() || null
+          : null;
 
     const existingPatient = await db.patient.findUnique({
       where: { fileNumber },
@@ -73,6 +129,8 @@ export async function createPatient(
     const patient = await db.patient.create({
       data: {
         fileNumber,
+        hospitalId,
+        branchId: branchId || undefined,
         title: body.title,
         name,
         firstName,
@@ -99,6 +157,8 @@ export async function createPatient(
         bloodType: body.bloodType,
         emergencyContact: body.emergencyContact,
         category,
+        insuranceName,
+        insuranceNumber,
       },
     });
 
@@ -118,10 +178,12 @@ export async function createPatient(
 /**
  * Récupère les détails d'un patient spécifique par son ID ou fileNumber
  */
-export async function getPatientById(req: Request, res: Response) {
+export async function getPatientById(req: AuthRequest, res: Response) {
   const patientId = (req.params.id || req.params.patientId) as string;
   
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+
     // Récupérer le patient par id ou numéro de dossier
     let patient = await db.patient.findUnique({
       where: { id: patientId }
@@ -138,6 +200,10 @@ export async function getPatientById(req: Request, res: Response) {
         data: null,
         error: "Patient not found"
       });
+    }
+
+    if (denyIfWrongHospital(patient, hospitalId, res)) {
+      return;
     }
 
     const resolvedPatientId = patient.id;
@@ -240,7 +306,7 @@ export async function getPatientById(req: Request, res: Response) {
  * Met à jour les informations d'un patient existant
  */
 export async function updatePatient(
-  req: TypedRequestBody<PatientUpdateProps & Record<string, unknown>>,
+  req: AuthRequest & TypedRequestBody<PatientUpdateProps & Record<string, unknown>>,
   res: Response
 ) {
   const patientId = (req.params.id || req.params.patientId) as string;
@@ -253,9 +319,12 @@ export async function updatePatient(
     profession?: string;
     maritalStatus?: string;
     admissionDate?: string;
+    affiliateNumber?: string;
   };
   
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+
     // Vérifier si le patient existe
     const existingPatient = await db.patient.findUnique({
       where: { id: patientId }
@@ -266,6 +335,10 @@ export async function updatePatient(
         data: null,
         error: "Patient not found"
       });
+    }
+
+    if (denyIfWrongHospital(existingPatient, hospitalId, res)) {
+      return;
     }
 
     const fileNumber = data.fileNumber || data.regNo;
@@ -301,9 +374,16 @@ export async function updatePatient(
     if (data.bloodType !== undefined) updateData.bloodType = data.bloodType;
     if (data.emergencyContact !== undefined) updateData.emergencyContact = data.emergencyContact;
     if (data.category !== undefined) {
-      const raw = data.category as string;
-      updateData.category =
-        raw === "INDIVIDUAL" || raw === "IND" ? "PRIVATE" : raw;
+      updateData.category = normalizePatientCategory(data.category);
+    }
+    if (data.insuranceName !== undefined) {
+      updateData.insuranceName =
+        typeof data.insuranceName === "string" ? data.insuranceName.trim() || null : null;
+    }
+    if (data.insuranceNumber !== undefined || data.affiliateNumber !== undefined) {
+      const raw =
+        data.insuranceNumber !== undefined ? data.insuranceNumber : data.affiliateNumber;
+      updateData.insuranceNumber = typeof raw === "string" ? raw.trim() || null : null;
     }
     if (data.nationality !== undefined) updateData.nationality = data.nationality;
     if (data.profession !== undefined) updateData.profession = data.profession;
@@ -346,7 +426,7 @@ export async function updatePatient(
 /**
  * Recherche des patients selon différents critères
  */
-export async function searchPatients(req: Request, res: Response) {
+export async function searchPatients(req: AuthRequest, res: Response) {
   const { 
     query, 
     fileNumber,
@@ -360,13 +440,24 @@ export async function searchPatients(req: Request, res: Response) {
   } = req.query;
   
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return res.status(200).json({
+        data: {
+          patients: [],
+          pagination: { total: 0, page: 1, limit: 10, totalPages: 0 }
+        },
+        error: null
+      });
+    }
+
     // Convertir les paramètres de pagination
     const pageNumber = parseInt(page as string, 10);
     const limitNumber = parseInt(limit as string, 10);
     const skip = (pageNumber - 1) * limitNumber;
     
     // Construire les conditions de recherche
-    const where: any = {};
+    const where: any = { hospitalId };
     
     // Recherche par numéro de dossier
     if (fileNumber) {
@@ -469,10 +560,12 @@ export async function searchPatients(req: Request, res: Response) {
  * Supprime un patient du système
  * Note: Dans un système médical réel, il est souvent préférable de désactiver un patient plutôt que de le supprimer
  */
-export async function deletePatient(req: Request, res: Response) {
+export async function deletePatient(req: AuthRequest, res: Response) {
   const patientId = (req.params.id || req.params.patientId) as string;
   
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+
     // Vérifier si le patient existe
     const patient = await db.patient.findUnique({
       where: { id: patientId }
@@ -483,6 +576,10 @@ export async function deletePatient(req: Request, res: Response) {
         data: null,
         error: "Patient not found"
       });
+    }
+
+    if (denyIfWrongHospital(patient, hospitalId, res)) {
+      return;
     }
     
     // Vérifier si le patient a des entrées dans les files d'attente
@@ -996,14 +1093,23 @@ export async function addMedicalHistory(
 /**
  * Récupère les patients récemment ajoutés au système
  */
-export async function getRecentPatients(req: Request, res: Response) {
+export async function getRecentPatients(req: AuthRequest, res: Response) {
   const { limit = '10' } = req.query;
   
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return res.status(200).json({
+        data: [],
+        error: null
+      });
+    }
+
     const limitNumber = parseInt(limit as string, 10);
     
     // Récupérer les patients récemment ajoutés
     const recentPatients = await db.patient.findMany({
+      where: { hospitalId },
       orderBy: { createdAt: 'desc' },
       take: limitNumber
     });
@@ -1031,9 +1137,18 @@ export async function getRecentPatients(req: Request, res: Response) {
 /**
  * Récupère tous les patients avec pagination et filtres optionnels
  */
-export async function getPatients(req: Request, res: Response) {
+export async function getPatients(req: AuthRequest, res: Response) {
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return res.status(200).json({
+        data: [],
+        error: null
+      });
+    }
+
     const patients = await db.patient.findMany({
+      where: { hospitalId },
       orderBy: { 
          createdAt: "desc"
       },
@@ -1061,7 +1176,15 @@ export async function getPatients(req: Request, res: Response) {
     });
  
   } catch (error) {
-    console.error("Error fetching patients:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    const prismaCode =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : undefined;
+    console.error(
+      "Error fetching patients:",
+      prismaCode ? `[${prismaCode}] ${message}` : message
+    );
     return res.status(500).json({
       data: null,
       error: "Failed to fetch patients"

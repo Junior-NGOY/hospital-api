@@ -1,6 +1,8 @@
 import express from "express";
+import { authenticate } from "@/middleware/auth";
 import {
   createBranch,
+  getAllBranches,
   getBranchesByHospital,
   getBranchById,
   updateBranch,
@@ -9,10 +11,11 @@ import {
 
 const branchRouter = express.Router();
 
-branchRouter.post("/branches", createBranch);
-branchRouter.get("/hospitals/:hospitalId/branches", getBranchesByHospital);
-branchRouter.get("/branches/:id", getBranchById);
-branchRouter.put("/branches/:id", updateBranch);
-branchRouter.delete("/branches/:id", deleteBranch);
+branchRouter.post("/branches", authenticate, createBranch);
+branchRouter.get("/branches", authenticate, getAllBranches);
+branchRouter.get("/hospitals/:hospitalId/branches", authenticate, getBranchesByHospital);
+branchRouter.get("/branches/:id", authenticate, getBranchById);
+branchRouter.put("/branches/:id", authenticate, updateBranch);
+branchRouter.delete("/branches/:id", authenticate, deleteBranch);
 
 export default branchRouter;

@@ -1,6 +1,8 @@
 import { db } from "@/db/db";
 import { Request, Response } from "express";
 import { TypedRequestBody } from "@/types";
+import { AuthRequest } from "@/middleware/auth";
+import { resolveHospitalScope } from "@/utils/hospitalScope";
 
 // ==================== FONCTIONS POUR LES BRANCHES ====================
 
@@ -90,51 +92,80 @@ export async function createBranch(
   }
 }
 
+const branchListInclude = {
+  _count: {
+    select: {
+      departments: true,
+      users: true,
+      appointments: true,
+    },
+  },
+} as const;
+
+async function listBranchesForHospital(hospitalId: string) {
+  return db.hospitalBranch.findMany({
+    where: { hospitalId },
+    orderBy: [{ isMainBranch: "desc" }, { name: "asc" }],
+    include: branchListInclude,
+  });
+}
+
 /**
- * Récupère toutes les branches d'un hôpital
+ * Récupère les branches de l'hôpital du JWT (jamais toutes les tenants).
+ * Sans hôpital sur le jeton : 200 [].
  */
-export async function getBranchesByHospital(req: Request, res: Response) {
-  const { hospitalId } = req.params;
-
+export async function getAllBranches(req: AuthRequest, res: Response) {
   try {
-    // Vérifier si l'hôpital existe
-    const hospital = await db.hospital.findUnique({
-      where: { id: hospitalId }
-    });
-
-    if (!hospital) {
-      return res.status(404).json({
-        data: null,
-        error: "Hôpital non trouvé"
-      });
+    const { hospitalId: scoped } = await resolveHospitalScope(req);
+    if (!scoped) {
+      return res.status(200).json({ data: [], error: null });
     }
 
-    // Récupérer les branches
-    const branches = await db.hospitalBranch.findMany({
-      where: { hospitalId },
-      orderBy: [
-        { isMainBranch: "desc" },
-        { name: "asc" }
-      ],
-      include: {
-        _count: {
-          select: {
-            departments: true,
-            users: true
-          }
-        }
-      }
-    });
+    const requested =
+      typeof req.query.hospitalId === "string" ? req.query.hospitalId.trim() : "";
+    if (requested && requested !== scoped) {
+      return res.status(200).json({ data: [], error: null });
+    }
 
+    const branches = await listBranchesForHospital(scoped);
     return res.status(200).json({
       data: branches,
-      error: null
+      error: null,
     });
   } catch (error) {
     console.log(error);
-    return res.status(500).json({
-      data: null,
-      error: "Une erreur est survenue lors de la récupération des branches"
+    return res.status(200).json({
+      data: [],
+      error: null,
+    });
+  }
+}
+
+/**
+ * Récupère toutes les branches d'un hôpital (JWT must own that hospital).
+ */
+export async function getBranchesByHospital(req: AuthRequest, res: Response) {
+  const { hospitalId } = req.params;
+
+  try {
+    const { hospitalId: scoped } = await resolveHospitalScope(req);
+    if (!scoped || !hospitalId || scoped !== hospitalId) {
+      return res.status(200).json({
+        data: [],
+        error: null,
+      });
+    }
+
+    const branches = await listBranchesForHospital(scoped);
+    return res.status(200).json({
+      data: branches,
+      error: null,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(200).json({
+      data: [],
+      error: null,
     });
   }
 }

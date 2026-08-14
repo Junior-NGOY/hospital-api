@@ -1,78 +1,126 @@
 import { db } from "@/db/db";
-import { Request, Response } from "express";
-import { TypedRequestBody } from "@/types";
+import { AuthRequest } from "@/middleware/auth";
+import {
+  jsonError,
+  jsonOk,
+  requireHospitalForWrite,
+  resolveHospitalScope,
+} from "@/utils/hospitalScope";
+import { applyStockDelta, toDate, toPositiveInt } from "@/utils/pharmacyStock";
+import { Prisma, StockMovementType } from "@prisma/client";
+import { Response } from "express";
 
-type MedicationBody = {
-  name: string;
-  form?: string | null;
-  stock?: number | null;
-  supplierId?: string | null;
-  hospitalId?: string | null;
-};
+const medicationInclude = {
+  supplier: true,
+  hospital: { select: { id: true, name: true } },
+} satisfies Prisma.MedicationInclude;
 
-/**
- * Crée un nouveau médicament (aligné sur le schéma Prisma actuel)
- */
-export async function createMedication(
-  req: TypedRequestBody<MedicationBody>,
-  res: Response
+function parseUnitPrice(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+async function medicationInHospital(
+  id: string,
+  hospitalId: string
 ) {
+  return db.medication.findFirst({
+    where: { id, hospitalId },
+    include: medicationInclude,
+  });
+}
+
+export async function createMedication(req: AuthRequest, res: Response) {
   try {
-    const data = req.body;
+    const scope = await requireHospitalForWrite(req, res);
+    if (!scope) return;
 
-    if (!data.name?.trim()) {
-      return res.status(400).json({
-        data: null,
-        error: "Le nom du médicament est requis",
-      });
+    const data = req.body as Record<string, unknown>;
+    const name = String(data.name || "").trim();
+    if (!name) {
+      return jsonError(res, 400, "Le nom du médicament est requis");
     }
 
-    const existingMedication = await db.medication.findFirst({
-      where: {
-        name: data.name,
-        form: data.form ?? undefined,
-      },
+    const form = data.form ? String(data.form).trim() : null;
+    const existing = await db.medication.findFirst({
+      where: { hospitalId: scope.hospitalId, name, form: form ?? undefined },
     });
-
-    if (existingMedication) {
-      return res.status(400).json({
-        data: null,
-        error: "Un médicament avec ce nom et cette forme existe déjà",
-      });
+    if (existing) {
+      return jsonError(
+        res,
+        400,
+        "Un médicament avec ce nom et cette forme existe déjà"
+      );
     }
 
-    const newMedication = await db.medication.create({
-      data: {
-        name: data.name.trim(),
-        form: data.form || null,
-        stock: data.stock ?? 0,
-        supplierId: data.supplierId || null,
-        hospitalId: data.hospitalId || null,
-      },
-      include: {
-        supplier: true,
-        hospital: true,
-      },
+    const initialStock = Math.max(0, Number(data.stock) || 0);
+    const minStock = Math.max(0, Number(data.minStock) || 10);
+    const unitPrice = parseUnitPrice(data.unitPrice);
+    const supplierId = data.supplierId ? String(data.supplierId) : null;
+
+    if (supplierId) {
+      const supplier = await db.supplier.findFirst({
+        where: { id: supplierId, hospitalId: scope.hospitalId },
+      });
+      if (!supplier) {
+        return jsonError(res, 400, "Fournisseur introuvable");
+      }
+    }
+
+    const created = await db.$transaction(async (tx) => {
+      const medication = await tx.medication.create({
+        data: {
+          name,
+          form,
+          genericName: data.genericName ? String(data.genericName).trim() : null,
+          strength: data.strength ? String(data.strength).trim() : null,
+          stock: 0,
+          minStock,
+          unitPrice: unitPrice ?? null,
+          supplierId,
+          hospitalId: scope.hospitalId,
+        },
+        include: medicationInclude,
+      });
+
+      if (initialStock > 0) {
+        const result = await applyStockDelta(tx, {
+          hospitalId: scope.hospitalId,
+          medicationId: medication.id,
+          delta: initialStock,
+          type: StockMovementType.IN,
+          reason: "Stock initial",
+          createdById: scope.userId || null,
+          createLot: true,
+          unit: "unité",
+        });
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        return result.medication;
+      }
+      return medication;
     });
 
-    return res.status(201).json({
-      data: newMedication,
-      error: null,
-    });
+    return jsonOk(res, created, 201);
   } catch (error) {
-    console.error("Error creating medication:", error);
-    return res.status(500).json({
-      data: null,
-      error: "Erreur lors de la création du médicament",
-    });
+    console.error("createMedication", error);
+    return jsonError(res, 500, "Erreur lors de la création du médicament");
   }
 }
 
-/**
- * Récupère tous les médicaments avec filtres optionnels
- */
-export async function getMedications(req: Request, res: Response) {
+export async function getMedications(req: AuthRequest, res: Response) {
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return jsonOk(res, {
+        medications: [],
+        pagination: { total: 0, page: 1, limit: 100, totalPages: 0 },
+      });
+    }
+
     const {
       search,
       inStock,
@@ -83,12 +131,11 @@ export async function getMedications(req: Request, res: Response) {
     } = req.query;
 
     const skip = (Number(page) - 1) * Number(limit);
-    const where: Record<string, unknown> = {};
+    const where: Prisma.MedicationWhereInput = { hospitalId };
 
     if (search) {
-      where.name = { contains: search as string, mode: "insensitive" };
+      where.name = { contains: String(search), mode: "insensitive" };
     }
-
     if (inStock === "true") {
       where.stock = { gt: 0 };
     }
@@ -97,213 +144,404 @@ export async function getMedications(req: Request, res: Response) {
     const sortField = allowedSort.includes(String(sort)) ? String(sort) : "name";
     const sortOrder = order === "desc" ? "desc" : "asc";
 
-    const medications = await db.medication.findMany({
-      where,
-      include: {
-        supplier: true,
-        hospital: true,
-      },
-      orderBy: { [sortField]: sortOrder },
-      skip,
-      take: Number(limit),
-    });
+    const [medications, total] = await Promise.all([
+      db.medication.findMany({
+        where,
+        include: medicationInclude,
+        orderBy: { [sortField]: sortOrder },
+        skip,
+        take: Number(limit),
+      }),
+      db.medication.count({ where }),
+    ]);
 
-    const total = await db.medication.count({ where });
-
-    return res.status(200).json({
-      data: {
-        medications,
-        pagination: {
-          total,
-          page: Number(page),
-          limit: Number(limit),
-          totalPages: Math.ceil(total / Number(limit)),
-        },
+    return jsonOk(res, {
+      medications,
+      pagination: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
       },
-      error: null,
     });
   } catch (error) {
-    console.error("Error fetching medications:", error);
-    return res.status(500).json({
-      data: null,
-      error: "Erreur lors de la récupération des médicaments",
-    });
+    console.error("getMedications", error);
+    return jsonError(res, 500, "Erreur lors de la récupération des médicaments");
   }
 }
 
-/**
- * Récupère un médicament par son ID
- */
-export async function getMedicationById(req: Request, res: Response) {
+export async function getMedicationById(req: AuthRequest, res: Response) {
   try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return jsonError(res, 403, "Accès refusé");
+    }
     const { id } = req.params;
-    const medication = await db.medication.findUnique({
-      where: { id },
+    const medication = await db.medication.findFirst({
+      where: { id, hospitalId },
       include: {
-        supplier: true,
-        hospital: true,
+        ...medicationInclude,
+        inventories: { orderBy: { receivedAt: "desc" }, take: 50 },
         prescriptionMedications: true,
         administrations: true,
       },
     });
-
     if (!medication) {
-      return res.status(404).json({
-        data: null,
-        error: "Médicament non trouvé",
-      });
+      return jsonError(res, 404, "Médicament non trouvé");
     }
-
-    return res.status(200).json({
-      data: medication,
-      error: null,
-    });
+    return jsonOk(res, medication);
   } catch (error) {
-    console.error("Error fetching medication:", error);
-    return res.status(500).json({
-      data: null,
-      error: "Erreur lors de la récupération du médicament",
-    });
+    console.error("getMedicationById", error);
+    return jsonError(res, 500, "Erreur lors de la récupération du médicament");
   }
 }
 
-/**
- * Met à jour un médicament
- */
-export async function updateMedication(
-  req: TypedRequestBody<Partial<MedicationBody>>,
-  res: Response
-) {
+export async function updateMedication(req: AuthRequest, res: Response) {
   try {
+    const scope = await requireHospitalForWrite(req, res);
+    if (!scope) return;
     const { id } = req.params;
-    const data = req.body;
+    const data = req.body as Record<string, unknown>;
 
-    const existingMedication = await db.medication.findUnique({
-      where: { id },
-    });
-
-    if (!existingMedication) {
-      return res.status(404).json({
-        data: null,
-        error: "Médicament non trouvé",
-      });
+    const existing = await medicationInHospital(id, scope.hospitalId);
+    if (!existing) {
+      return jsonError(res, 404, "Médicament non trouvé");
     }
 
-    const updateData: Record<string, unknown> = {};
-    if (data.name !== undefined) updateData.name = data.name;
-    if (data.form !== undefined) updateData.form = data.form;
-    if (data.stock !== undefined) updateData.stock = data.stock;
-    if (data.supplierId !== undefined) updateData.supplierId = data.supplierId;
-    if (data.hospitalId !== undefined) updateData.hospitalId = data.hospitalId;
+    const updateData: Prisma.MedicationUpdateInput = {};
+    if (data.name !== undefined) updateData.name = String(data.name).trim();
+    if (data.form !== undefined) updateData.form = data.form ? String(data.form) : null;
+    if (data.genericName !== undefined) {
+      updateData.genericName = data.genericName ? String(data.genericName) : null;
+    }
+    if (data.strength !== undefined) {
+      updateData.strength = data.strength ? String(data.strength) : null;
+    }
+    if (data.minStock !== undefined) {
+      updateData.minStock = Math.max(0, Number(data.minStock) || 0);
+    }
+    if (data.unitPrice !== undefined) {
+      const price = parseUnitPrice(data.unitPrice);
+      if (price === undefined) {
+        return jsonError(res, 400, "Prix unitaire invalide (CDF)");
+      }
+      updateData.unitPrice = price;
+    }
+    if (data.supplierId !== undefined) {
+      const supplierId = data.supplierId ? String(data.supplierId) : null;
+      if (supplierId) {
+        const supplier = await db.supplier.findFirst({
+          where: { id: supplierId, hospitalId: scope.hospitalId },
+        });
+        if (!supplier) {
+          return jsonError(res, 400, "Fournisseur introuvable");
+        }
+        updateData.supplier = { connect: { id: supplierId } };
+      } else {
+        updateData.supplier = { disconnect: true };
+      }
+    }
 
-    const updatedMedication = await db.medication.update({
+    const updated = await db.medication.update({
       where: { id },
       data: updateData,
-      include: {
-        supplier: true,
-        hospital: true,
-      },
+      include: medicationInclude,
     });
-
-    return res.status(200).json({
-      data: updatedMedication,
-      error: null,
-    });
+    return jsonOk(res, updated);
   } catch (error) {
-    console.error("Error updating medication:", error);
-    return res.status(500).json({
-      data: null,
-      error: "Erreur lors de la mise à jour du médicament",
-    });
+    console.error("updateMedication", error);
+    return jsonError(res, 500, "Erreur lors de la mise à jour du médicament");
   }
 }
 
-/**
- * Supprime un médicament
- */
-export async function deleteMedication(req: Request, res: Response) {
+export async function deleteMedication(req: AuthRequest, res: Response) {
   try {
+    const scope = await requireHospitalForWrite(req, res);
+    if (!scope) return;
     const { id } = req.params;
-    const medication = await db.medication.findUnique({
-      where: { id },
+    const medication = await db.medication.findFirst({
+      where: { id, hospitalId: scope.hospitalId },
       include: {
         prescriptionMedications: true,
         administrations: true,
       },
     });
-
     if (!medication) {
-      return res.status(404).json({
-        data: null,
-        error: "Médicament non trouvé",
-      });
+      return jsonError(res, 404, "Médicament non trouvé");
     }
-
     if (
       medication.prescriptionMedications.length > 0 ||
       medication.administrations.length > 0
     ) {
-      return res.status(400).json({
-        data: null,
-        error:
-          "Impossible de supprimer ce médicament car il est utilisé dans des prescriptions ou administrations",
-      });
+      return jsonError(
+        res,
+        400,
+        "Impossible de supprimer ce médicament car il est utilisé dans des prescriptions ou administrations"
+      );
     }
-
-    await db.medication.delete({
-      where: { id },
-    });
-
-    return res.status(200).json({
-      data: "Médicament supprimé avec succès",
-      error: null,
-    });
+    await db.medication.delete({ where: { id } });
+    return jsonOk(res, "Médicament supprimé avec succès");
   } catch (error) {
-    console.error("Error deleting medication:", error);
-    return res.status(500).json({
-      data: null,
-      error: "Erreur lors de la suppression du médicament",
-    });
+    console.error("deleteMedication", error);
+    return jsonError(res, 500, "Erreur lors de la suppression du médicament");
   }
 }
 
 /**
- * Ajuste le stock d'un médicament
+ * Ajuste le stock (entrée / sortie / ajustement) et enregistre un mouvement.
  */
-export async function adjustMedicationStock(req: Request, res: Response) {
+export async function adjustMedicationStock(req: AuthRequest, res: Response) {
   try {
+    const scope = await requireHospitalForWrite(req, res);
+    if (!scope) return;
     const { id } = req.params;
-    const { adjustment } = req.body;
-
-    const medication = await db.medication.findUnique({
-      where: { id },
-    });
-
-    if (!medication) {
-      return res.status(404).json({
-        data: null,
-        error: "Médicament non trouvé",
-      });
+    const body = req.body as Record<string, unknown>;
+    const adjustment = Number(body.adjustment);
+    if (!Number.isFinite(adjustment) || adjustment === 0) {
+      return jsonError(res, 400, "Ajustement invalide");
+    }
+    const reason = String(body.reason || "").trim();
+    if (reason.length < 3) {
+      return jsonError(res, 400, "La raison doit contenir au moins 3 caractères");
     }
 
-    const updatedMedication = await db.medication.update({
-      where: { id },
-      data: {
-        stock: {
-          increment: Number(adjustment) || 0,
-        },
+    const typeRaw = String(body.type || "").toUpperCase();
+    let type: StockMovementType;
+    if (typeRaw === "IN") type = StockMovementType.IN;
+    else if (typeRaw === "OUT") type = StockMovementType.OUT;
+    else if (typeRaw === "ADJUSTMENT") type = StockMovementType.ADJUSTMENT;
+    else type = adjustment > 0 ? StockMovementType.IN : StockMovementType.OUT;
+
+    const expiryDate = toDate(body.expiryDate);
+    const supplierId = body.supplierId ? String(body.supplierId) : null;
+    const createLot = type === StockMovementType.IN && adjustment > 0;
+
+    const result = await db.$transaction((tx) =>
+      applyStockDelta(tx, {
+        hospitalId: scope.hospitalId,
+        medicationId: id,
+        delta: Math.trunc(adjustment),
+        type,
+        reason,
+        expiryDate,
+        supplierId,
+        createdById: scope.userId || null,
+        createLot,
+        unit: body.unit ? String(body.unit) : "unité",
+        notes: body.notes ? String(body.notes) : null,
+      })
+    );
+
+    if (result.error) {
+      return jsonError(res, result.status, result.error);
+    }
+    return jsonOk(res, {
+      ...result.medication,
+      movement: result.movement,
+    });
+  } catch (error) {
+    console.error("adjustMedicationStock", error);
+    return jsonError(res, 500, "Erreur lors de l'ajustement du stock");
+  }
+}
+
+export async function receiveInventory(req: AuthRequest, res: Response) {
+  try {
+    const scope = await requireHospitalForWrite(req, res);
+    if (!scope) return;
+    const body = req.body as Record<string, unknown>;
+    const medicationId = String(body.medicationId || "");
+    const quantity = toPositiveInt(body.quantity);
+    if (!medicationId || !quantity) {
+      return jsonError(res, 400, "medicationId et quantity (> 0) sont requis");
+    }
+
+    const supplierId = body.supplierId ? String(body.supplierId) : null;
+    if (supplierId) {
+      const supplier = await db.supplier.findFirst({
+        where: { id: supplierId, hospitalId: scope.hospitalId },
+      });
+      if (!supplier) {
+        return jsonError(res, 400, "Fournisseur introuvable");
+      }
+    }
+
+    const result = await db.$transaction((tx) =>
+      applyStockDelta(tx, {
+        hospitalId: scope.hospitalId,
+        medicationId,
+        delta: quantity,
+        type: StockMovementType.IN,
+        reason: body.reason ? String(body.reason) : "Entrée de stock",
+        expiryDate: toDate(body.expiryDate),
+        supplierId,
+        createdById: scope.userId || null,
+        createLot: true,
+        unit: body.unit ? String(body.unit) : "unité",
+        notes: body.notes ? String(body.notes) : null,
+      })
+    );
+
+    if (result.error) {
+      return jsonError(res, result.status, result.error);
+    }
+    return jsonOk(
+      res,
+      { medication: result.medication, movement: result.movement },
+      201
+    );
+  } catch (error) {
+    console.error("receiveInventory", error);
+    return jsonError(res, 500, "Erreur lors de l'entrée de stock");
+  }
+}
+
+export async function getInventoryLots(req: AuthRequest, res: Response) {
+  try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) return jsonOk(res, []);
+    const medicationId =
+      typeof req.query.medicationId === "string"
+        ? req.query.medicationId
+        : undefined;
+    const lots = await db.inventory.findMany({
+      where: {
+        hospitalId,
+        ...(medicationId ? { medicationId } : {}),
+      },
+      include: {
+        medication: { select: { id: true, name: true, form: true } },
+        supplier: { select: { id: true, name: true } },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 200,
+    });
+    return jsonOk(res, lots);
+  } catch (error) {
+    console.error("getInventoryLots", error);
+    return jsonError(res, 500, "Erreur lors de la récupération des lots");
+  }
+}
+
+export async function getStockMovements(req: AuthRequest, res: Response) {
+  try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) return jsonOk(res, []);
+    const medicationId =
+      typeof req.query.medicationId === "string"
+        ? req.query.medicationId
+        : undefined;
+    const movements = await db.stockMovement.findMany({
+      where: {
+        hospitalId,
+        ...(medicationId ? { medicationId } : {}),
+      },
+      include: {
+        medication: { select: { id: true, name: true, form: true } },
+        supplier: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    return jsonOk(res, movements);
+  } catch (error) {
+    console.error("getStockMovements", error);
+    return jsonError(res, 500, "Erreur lors de la récupération des mouvements");
+  }
+}
+
+export async function getPharmacyAlerts(req: AuthRequest, res: Response) {
+  try {
+    const { hospitalId } = await resolveHospitalScope(req);
+    if (!hospitalId) {
+      return jsonOk(res, { low: [], out: [], expiring: [], expired: [] });
+    }
+
+    const medications = await db.medication.findMany({
+      where: { hospitalId },
+      select: {
+        id: true,
+        name: true,
+        form: true,
+        stock: true,
+        minStock: true,
       },
     });
 
-    return res.status(200).json({
-      data: updatedMedication,
-      error: null,
+    const out = medications
+      .filter((m) => (m.stock ?? 0) <= 0)
+      .map((m) => ({
+        id: `${m.id}-out`,
+        type: "out" as const,
+        medicationId: m.id,
+        medicationName: m.name,
+        form: m.form,
+        stock: m.stock ?? 0,
+        minStock: m.minStock,
+        message: "Stock épuisé",
+        priority: "high" as const,
+      }));
+
+    const low = medications
+      .filter((m) => (m.stock ?? 0) > 0 && (m.stock ?? 0) <= m.minStock)
+      .map((m) => ({
+        id: `${m.id}-low`,
+        type: "low" as const,
+        medicationId: m.id,
+        medicationName: m.name,
+        form: m.form,
+        stock: m.stock ?? 0,
+        minStock: m.minStock,
+        message: `Stock faible (${m.stock} ≤ min ${m.minStock})`,
+        priority: "medium" as const,
+      }));
+
+    const soon = new Date();
+    soon.setDate(soon.getDate() + 90);
+    const now = new Date();
+
+    const lots = await db.inventory.findMany({
+      where: {
+        hospitalId,
+        quantity: { gt: 0 },
+        expiryDate: { not: null, lte: soon },
+      },
+      include: { medication: { select: { id: true, name: true, form: true } } },
+      orderBy: { expiryDate: "asc" },
     });
+
+    const expired = lots
+      .filter((lot) => lot.expiryDate && lot.expiryDate < now)
+      .map((lot) => ({
+        id: `${lot.id}-expired`,
+        type: "expired" as const,
+        medicationId: lot.medicationId,
+        medicationName: lot.medication.name,
+        form: lot.medication.form,
+        stock: lot.quantity,
+        expiryDate: lot.expiryDate,
+        message: `Lot périmé (${lot.quantity} unités)`,
+        priority: "high" as const,
+      }));
+
+    const expiring = lots
+      .filter((lot) => lot.expiryDate && lot.expiryDate >= now)
+      .map((lot) => ({
+        id: `${lot.id}-expiring`,
+        type: "expiring" as const,
+        medicationId: lot.medicationId,
+        medicationName: lot.medication.name,
+        form: lot.medication.form,
+        stock: lot.quantity,
+        expiryDate: lot.expiryDate,
+        message: `Péremption le ${lot.expiryDate?.toISOString().slice(0, 10)} (${lot.quantity} unités)`,
+        priority: "medium" as const,
+      }));
+
+    return jsonOk(res, { low, out, expiring, expired });
   } catch (error) {
-    console.error("Error adjusting medication stock:", error);
-    return res.status(500).json({
-      data: null,
-      error: "Erreur lors de l'ajustement du stock",
-    });
+    console.error("getPharmacyAlerts", error);
+    return jsonError(res, 500, "Erreur lors du calcul des alertes");
   }
 }

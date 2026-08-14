@@ -3,6 +3,50 @@ import { Request, Response } from "express";
 import { TypedRequestBody } from "@/types";
 import { Specialization, UserRole } from "@prisma/client";
 import bcrypt from "bcrypt";
+import { AuthRequest } from "@/middleware/auth";
+import { generateAccessToken, generateRefreshToken } from "@/utils/tokens";
+
+function isBcryptHash(value: string): boolean {
+  return value.startsWith("$2a$") || value.startsWith("$2b$") || value.startsWith("$2y$");
+}
+
+async function passwordsMatch(plain: string, stored: string): Promise<boolean> {
+  if (isBcryptHash(stored)) {
+    return bcrypt.compare(plain, stored);
+  }
+  // Legacy POST /register stored a dummy plaintext instead of bcrypt.
+  return stored === plain;
+}
+
+function publicUser(user: {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  role: UserRole;
+  hospitalId: string | null;
+  branchId: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  hospital?: { id: string; name: string } | null;
+}) {
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    phone: user.phone,
+    role: user.role,
+    hospitalId: user.hospitalId,
+    hospitalName: user.hospital?.name ?? null,
+    branchId: user.branchId,
+    isActive: user.isActive,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt
+  };
+}
 
 // Interface pour la création d'un utilisateur
 interface CreateUserProps {
@@ -44,10 +88,18 @@ export async function createUser(
   } = req.body;
 
   try {
-    // Vérifier si l'email existe déjà
+    if (!email || !firstName || !lastName || !role) {
+      return res.status(400).json({
+        data: null,
+        error: "Email, prénom, nom et rôle sont requis"
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
     const existingUser = await db.user.findUnique({
       where: {
-        email
+        email: normalizedEmail
       }
     });
 
@@ -110,14 +162,19 @@ export async function createUser(
       });
     }
 
-    // Hacher le mot de passe
-   // const hashedPassword = await bcrypt.hash(password, 10);
-    const hashedPassword = "1234";
+    if (!password) {
+      return res.status(400).json({
+        data: null,
+        error: "Le mot de passe est requis"
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Créer l'utilisateur de base
     const newUser = await db.user.create({
       data: {
-        email,
+        email: normalizedEmail,
         password: hashedPassword,
         firstName,
         lastName,
@@ -238,6 +295,136 @@ export async function createUser(
 }
 
 /**
+ * Connexion email + mot de passe → JWT
+ */
+export async function login(
+  req: TypedRequestBody<{ email?: string; password?: string }>,
+  res: Response
+) {
+  const email = req.body?.email?.trim();
+  const password = req.body?.password;
+
+  if (!email || !password) {
+    return res.status(400).json({
+      data: null,
+      error: "Email et mot de passe requis"
+    });
+  }
+
+  try {
+    const normalizedEmail = email.toLowerCase();
+    let user = await db.user.findUnique({
+      where: { email: normalizedEmail },
+      include: {
+        hospital: {
+          select: { id: true, name: true }
+        }
+      }
+    });
+
+    if (!user && normalizedEmail !== email) {
+      user = await db.user.findUnique({
+        where: { email },
+        include: {
+          hospital: {
+            select: { id: true, name: true }
+          }
+        }
+      });
+    }
+
+    if (!user || !(await passwordsMatch(password, user.password))) {
+      return res.status(401).json({
+        data: null,
+        error: "Email ou mot de passe incorrect"
+      });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        data: null,
+        error: "Compte désactivé"
+      });
+    }
+
+    if (!isBcryptHash(user.password)) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await db.user.update({
+        where: { id: user.id },
+        data: { password: hashedPassword }
+      });
+    }
+
+    const tokenPayload = {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      hospitalId: user.hospitalId,
+      branchId: user.branchId
+    };
+    const accessToken = generateAccessToken(tokenPayload);
+    const refreshToken = generateRefreshToken(tokenPayload);
+
+    return res.status(200).json({
+      data: {
+        user: publicUser(user),
+        accessToken,
+        refreshToken
+      },
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la connexion"
+    });
+  }
+}
+
+/**
+ * Utilisateur courant (Bearer)
+ */
+export async function getMe(req: AuthRequest, res: Response) {
+  const userId = req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({
+      data: null,
+      error: "Authentification requise"
+    });
+  }
+
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      include: {
+        hospital: {
+          select: { id: true, name: true }
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        data: null,
+        error: "Utilisateur non trouvé"
+      });
+    }
+
+    return res.status(200).json({
+      data: publicUser(user),
+      error: null
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      data: null,
+      error: "Une erreur est survenue lors de la récupération du profil"
+    });
+  }
+}
+
+/**
  * Récupère tous les utilisateurs
  */
 export async function getAllUsers(req: Request, res: Response) {
@@ -285,6 +472,7 @@ export async function getAllUsers(req: Request, res: Response) {
         } : false,
         doctor: {
           select: {
+            id: true,
             specialization: true,
             licenseNumber: true
           }

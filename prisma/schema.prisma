@@ -25,6 +25,7 @@ model Hospital {
   rooms               Room[]
   incomes             Income[]
   users               User[]
+  patients            Patient[]
   expenses            Expense[]
   consultationFees    ConsultationFee[]
   branches            HospitalBranch[]
@@ -34,6 +35,7 @@ model Hospital {
   emergencyContacts   HospitalEmergencyContact[]
   surgeries           Surgery[]
   invoices            Invoice[]
+  payments            Payment[]
   labTests            LabTest[]
   medications         Medication[]
   queues              Queue[]
@@ -41,6 +43,10 @@ model Hospital {
   equipment           Equipment[]
   vehicles            Vehicle[]
   medicalSupplies     MedicalSupply[]
+  suppliers           Supplier[]
+  inventories         Inventory[]
+  stockMovements      StockMovement[]
+  dispensings         Dispensing[]
 
   @@map("hospitals")
 }
@@ -60,6 +66,7 @@ model HospitalBranch {
 
   hospital         Hospital          @relation(fields: [hospitalId], references: [id])
   users            User[]
+  patients         Patient[]
   departments      Department[]
   appointments     Appointment[]
   consultations    Consultation[]
@@ -120,6 +127,8 @@ model User {
   labTestsOrdered       LabTest[]              @relation("DoctorLabTests")
   labTestsPerformed     LabTest[]              @relation("LabTechnician")
   generalSignsRecorded  GeneralSign[]          @relation("NurseGeneralSigns")
+  stockMovements        StockMovement[]
+  dispensings           Dispensing[]
 
   @@map("users")
 }
@@ -138,6 +147,10 @@ enum UserRole {
 model Patient {
   id                        String                     @id @default(cuid())
   fileNumber                String                     @unique // Numéro de dossier médical
+  // P0.3: établissement propriétaire. Obligatoire à la création (JWT).
+  // Nullable uniquement s'il n'existait aucune ligne Hospital au backfill.
+  hospitalId                String?
+  branchId                  String?
   title                     String?
   name                      String
   firstName                 String
@@ -154,6 +167,8 @@ model Patient {
   emergencyContact          String?
   nationality               String?
   category                  PatientCategory
+  insuranceName             String? // Mutuelle / entreprise (ex. SONAS, INSS)
+  insuranceNumber           String? // N° affilié
   subscriptions             PatientSubscription[]
   admissions                Admission[]
   appointments              Appointment[]
@@ -185,10 +200,13 @@ model Patient {
   bedTransfers              BedTransfer[]
   accessLogs                PatientAccessLog[]
   teleconsultations         Teleconsultation[]
+  hospital                  Hospital?                  @relation(fields: [hospitalId], references: [id])
+  branch                    HospitalBranch?            @relation(fields: [branchId], references: [id])
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
 
   @@index([category]) // Index sur la catégorie de patient
+  @@index([hospitalId])
   @@map("patients")
 }
 
@@ -316,8 +334,17 @@ enum PaymentMethod {
   CREDIT_CARD
   DEBIT_CARD
   BANK_TRANSFER
-  MOBILE_PAYMENT
+  MOBILE_PAYMENT // legacy générique — préférer MPESA / AIRTEL_MONEY / ORANGE_MONEY
   CHECK
+  MUTUELLE
+  MPESA
+  AIRTEL_MONEY
+  ORANGE_MONEY
+}
+
+enum Currency {
+  CDF
+  USD
 }
 
 // Personnel médical - Médecins
@@ -615,27 +642,30 @@ model Appointment {
   id            String            @id @default(cuid())
   patientId     String
   doctorId      String
-  hospitalId    String? // Ajoutez ce champ
-  branchId      String? // Ajoutez ce champ
+  hospitalId    String? // P1.6: pris dans le JWT à la création (jamais le body client)
+  branchId      String?
   scheduledDate DateTime
   duration      Int // En minutes
   status        AppointmentStatus @default(SCHEDULED)
   reason        String?
   notes         String?
+  type          String?           @default("consultation") // consultation | follow-up | emergency | checkup | procedure
+  priority      String?           @default("normal") // low | normal | high | urgent
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
-  hospital Hospital?       @relation(fields: [hospitalId], references: [id]) // Ajoutez cette relation
-  branch   HospitalBranch? @relation(fields: [branchId], references: [id]) // Ajoutez cette relation
+  hospital Hospital?       @relation(fields: [hospitalId], references: [id])
+  branch   HospitalBranch? @relation(fields: [branchId], references: [id])
 
   patient          Patient           @relation(fields: [patientId], references: [id])
   doctor           Doctor            @relation(fields: [doctorId], references: [id])
   consultation     Consultation?
   teleconsultation Teleconsultation?
 
-  @@index([patientId, scheduledDate]) // Index pour rechercher les rendez-vous par patient et date
-  @@index([doctorId, scheduledDate]) // Index pour rechercher les rendez-vous par médecin et date
-  @@index([status]) // Index sur le statut du rendez-vous
+  @@index([patientId, scheduledDate])
+  @@index([doctorId, scheduledDate])
+  @@index([hospitalId, scheduledDate])
+  @@index([status])
   @@map("appointments")
 }
 
@@ -672,6 +702,7 @@ model Consultation {
   clinicalExamination ClinicalExamination[]
   paraclinicalExam    ParaclinicalExam[]
   prescriptions       Prescription[]
+  labTests            LabTest[]
   appointment         Appointment?          @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   patient             Patient               @relation(fields: [patientId], references: [id], onDelete: Restrict)
   doctor              Doctor?               @relation(fields: [doctorId], references: [id], onDelete: Restrict)
@@ -757,6 +788,7 @@ model ParaclinicalExam {
   patient         Patient       @relation(fields: [patientId], references: [id])
   doctor          Doctor?       @relation(fields: [doctorId], references: [id])
   consultation    Consultation? @relation(fields: [consultationId], references: [id])
+  labTest         LabTest?
 
   @@map("paraclinical_exams")
 }
@@ -774,21 +806,26 @@ model Prescription {
   doctor         Doctor?                  @relation(fields: [doctorId], references: [id])
   consultation   Consultation?            @relation(fields: [consultationId], references: [id])
   hospital       Hospital?                @relation(fields: [hospitalId], references: [id])
+  stockMovements StockMovement[]
+  dispensings    Dispensing[]
   createdAt      DateTime                 @default(now())
 
   @@map("prescriptions")
 }
 
 model PrescriptionMedication {
-  id             String       @id @default(cuid())
-  prescriptionId String
-  medicationId   String
-  dosage         String
-  frequency      String
-  duration       String
-  instructions   String?
-  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
-  medication     Medication   @relation(fields: [medicationId], references: [id])
+  id                String       @id @default(cuid())
+  prescriptionId    String
+  medicationId      String
+  dosage            String
+  frequency         String
+  duration          String
+  instructions      String?
+  quantity          Int          @default(1)
+  dispensedQuantity Int          @default(0)
+  dispensedAt       DateTime?
+  prescription      Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medication        Medication   @relation(fields: [medicationId], references: [id])
 
   @@map("prescription_medications")
 }
@@ -797,31 +834,47 @@ model Medication {
   id                      String                     @id @default(cuid())
   name                    String
   form                    String? // Form of medication (tablet, capsule, etc.)
+  genericName             String?
+  strength                String?
   supplierId              String?
   hospitalId              String?
   stock                   Int?                       @default(0)
+  minStock                Int                        @default(10)
+  unitPrice               Float? // CDF
   supplier                Supplier?                  @relation(fields: [supplierId], references: [id])
   hospital                Hospital?                  @relation(fields: [hospitalId], references: [id])
   prescriptionMedications PrescriptionMedication[]
   inventories             Inventory[]
   administrations         MedicationAdministration[] @relation("MedicationAdministrations")
+  stockMovements          StockMovement[]
+  dispensings             Dispensing[]
 
+  @@index([hospitalId])
   @@map("medications")
 }
 
 // Fournisseurs
 model Supplier {
-  id            String  @id @default(uuid())
+  id            String   @id @default(uuid())
+  hospitalId    String?
   name          String
   contactPerson String?
   phone         String?
   email         String?
   address       String?
+  website       String?
+  notes         String?
   paymentTerms  Int? // Délai de paiement en jours
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
+  hospital       Hospital?       @relation(fields: [hospitalId], references: [id])
   medications    Medication[]
   inventoryItems Inventory[]
+  stockMovements StockMovement[]
 
+  @@index([hospitalId])
   @@map("suppliers")
 }
 
@@ -946,29 +999,38 @@ model StaffSchedule {
 }
 
 model Income {
-  id         String          @id @default(cuid())
-  hospitalId String
-  branchId   String?
-  amount     Float
-  source     String
-  date       DateTime        @default(now())
-  notes      String?
-  hospital   Hospital        @relation(fields: [hospitalId], references: [id])
-  branch     HospitalBranch? @relation(fields: [branchId], references: [id])
+  id            String          @id @default(cuid())
+  hospitalId    String
+  branchId      String?
+  amount        Float
+  currency      Currency        @default(CDF)
+  source        String
+  category      String?
+  date          DateTime        @default(now())
+  notes         String?
+  paymentMethod String?
+  status        String?         @default("RECEIVED")
+  invoiceId     String?
+  hospital      Hospital        @relation(fields: [hospitalId], references: [id])
+  branch        HospitalBranch? @relation(fields: [branchId], references: [id])
 
   @@map("incomes")
 }
 
 model Expense {
-  id         String          @id @default(cuid())
-  hospitalId String
-  branchId   String?
-  amount     Float
-  category   String
-  date       DateTime        @default(now())
-  notes      String?
-  hospital   Hospital        @relation(fields: [hospitalId], references: [id])
-  branch     HospitalBranch? @relation(fields: [branchId], references: [id])
+  id            String          @id @default(cuid())
+  hospitalId    String
+  branchId      String?
+  amount        Float
+  currency      Currency        @default(CDF)
+  category      String
+  vendor        String?
+  date          DateTime        @default(now())
+  notes         String?
+  paymentMethod String?
+  status        String?         @default("PAID")
+  hospital      Hospital        @relation(fields: [hospitalId], references: [id])
+  branch        HospitalBranch? @relation(fields: [branchId], references: [id])
 
   @@map("expenses")
 }
@@ -979,6 +1041,7 @@ model ConsultationFee {
   branchId   String?
   type       String // Ex: "General", "Specialist"
   amount     Float
+  currency   Currency        @default(CDF)
   isActive   Boolean         @default(true)
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
@@ -1025,8 +1088,12 @@ model Invoice {
   dueDate        DateTime?
   totalAmount    Float
   amountPaid     Float          @default(0)
+  patientShare   Float          @default(0)
+  mutuelleShare  Float          @default(0)
+  coveragePercent Float?
   status         InvoiceStatus  @default(PENDING)
   paymentMethod  PaymentMethod?
+  currency       Currency       @default(CDF)
   notes          String?
 
   // Relations
@@ -1034,11 +1101,26 @@ model Invoice {
   hospital     Hospital?            @relation(fields: [hospitalId], references: [id])
   subscription PatientSubscription? @relation(fields: [subscriptionId], references: [id])
   accountant   Accountant?          @relation(fields: [accountantId], references: [id])
+  items        InvoiceItem[]
+  payments     Payment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Float   @default(1)
+  unitPrice   Float
+  totalPrice  Float
+  serviceType String?
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
 }
 
 enum InvoiceStatus {
@@ -1296,6 +1378,7 @@ model ExamResult {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   patient        Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  labTest        LabTest?
 
   @@index([patientId])
   @@map("exam_results")
@@ -1419,18 +1502,80 @@ model BedTransfer {
 
 model Inventory {
   id           String    @id @default(cuid())
-  supplierId   String
+  hospitalId   String?
+  supplierId   String?
   medicationId String
   quantity     Int
-  unit         String
+  unit         String    @default("unité")
   receivedAt   DateTime  @default(now())
   expiryDate   DateTime?
   notes        String?
 
-  supplier   Supplier   @relation(fields: [supplierId], references: [id])
-  medication Medication @relation(fields: [medicationId], references: [id])
+  hospital       Hospital?       @relation(fields: [hospitalId], references: [id])
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id])
+  medication     Medication      @relation(fields: [medicationId], references: [id])
+  stockMovements StockMovement[]
 
+  @@index([hospitalId])
+  @@index([medicationId])
   @@map("inventories")
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+  DISPENSE
+}
+
+model StockMovement {
+  id             String            @id @default(cuid())
+  hospitalId     String
+  medicationId   String
+  inventoryId    String?
+  supplierId     String?
+  prescriptionId String?
+  dispensingId   String?
+  type           StockMovementType
+  quantity       Int
+  reason         String?
+  expiryDate     DateTime?
+  createdById    String?
+  createdAt      DateTime          @default(now())
+
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id])
+  medication   Medication    @relation(fields: [medicationId], references: [id])
+  inventory    Inventory?    @relation(fields: [inventoryId], references: [id])
+  supplier     Supplier?     @relation(fields: [supplierId], references: [id])
+  prescription Prescription? @relation(fields: [prescriptionId], references: [id])
+  dispensing   Dispensing?   @relation(fields: [dispensingId], references: [id])
+  createdBy    User?         @relation(fields: [createdById], references: [id])
+
+  @@index([hospitalId])
+  @@index([medicationId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+model Dispensing {
+  id             String   @id @default(cuid())
+  hospitalId     String
+  prescriptionId String
+  medicationId   String
+  quantity       Int
+  notes          String?
+  dispensedById  String?
+  dispensedAt    DateTime @default(now())
+
+  hospital     Hospital        @relation(fields: [hospitalId], references: [id])
+  prescription Prescription    @relation(fields: [prescriptionId], references: [id])
+  medication   Medication      @relation(fields: [medicationId], references: [id])
+  dispensedBy  User?           @relation(fields: [dispensedById], references: [id])
+  movements    StockMovement[]
+
+  @@index([hospitalId])
+  @@index([prescriptionId])
+  @@map("dispensings")
 }
 
 model DailyNote {
@@ -1532,14 +1677,22 @@ model AuditLog {
 }
 
 model Payment {
-  id          String        @id @default(cuid())
-  userId      String
+  id          String         @id @default(cuid())
+  userId      String?
+  invoiceId   String?
+  hospitalId  String?
   amount      Float
-  paymentDate DateTime      @default(now())
+  currency    Currency       @default(CDF)
+  paymentDate DateTime       @default(now())
   method      PaymentMethod
   reference   String?
   notes       String?
-  user        User          @relation(fields: [userId], references: [id])
+  status      String?        @default("PAID")
+  category    String?
+  period      String?
+  user        User?          @relation(fields: [userId], references: [id])
+  invoice     Invoice?       @relation(fields: [invoiceId], references: [id])
+  hospital    Hospital?      @relation(fields: [hospitalId], references: [id])
 
   @@map("payments")
 }
@@ -1813,26 +1966,35 @@ model HospitalEmergencyContact {
 }
 
 model LabTest {
-  id           String        @id @default(cuid())
-  hospitalId   String
-  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  patientId    String
-  patient      Patient       @relation(fields: [patientId], references: [id])
-  doctorId     String?
-  doctor       User?         @relation("DoctorLabTests", fields: [doctorId], references: [id])
-  technicianId String?
-  technician   User?         @relation("LabTechnician", fields: [technicianId], references: [id])
-  testName     String
-  testType     String
-  status       LabTestStatus @default(PENDING)
-  orderDate    DateTime      @default(now())
-  sampleDate   DateTime?
-  resultDate   DateTime?
-  results      String?
-  notes        String?
-  urgency      String?       @default("NORMAL")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                 String             @id @default(cuid())
+  hospitalId         String
+  hospital           Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  patientId          String
+  patient            Patient            @relation(fields: [patientId], references: [id])
+  doctorId           String?
+  doctor             User?              @relation("DoctorLabTests", fields: [doctorId], references: [id])
+  technicianId       String?
+  technician         User?              @relation("LabTechnician", fields: [technicianId], references: [id])
+  consultationId     String?
+  consultation       Consultation?      @relation(fields: [consultationId], references: [id])
+  examResultId       String?            @unique
+  examResult         ExamResult?        @relation(fields: [examResultId], references: [id])
+  paraclinicalExamId String?            @unique
+  paraclinicalExam   ParaclinicalExam?  @relation(fields: [paraclinicalExamId], references: [id])
+  testName           String
+  testType           String
+  status             LabTestStatus      @default(PENDING)
+  orderDate          DateTime           @default(now())
+  sampleDate         DateTime?
+  resultDate         DateTime?
+  results            String?
+  notes              String?
+  urgency            String?            @default("NORMAL")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([hospitalId, status])
+  @@index([patientId])
 }
 
 model GeneralSign {

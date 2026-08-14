@@ -33,6 +33,105 @@ async function assertPatientExists(patientId: string) {
   });
 }
 
+/**
+ * Aggregate DME for a patient. Shared by public GET (QR exception P0.8)
+ * and the patient portal (P2.2).
+ */
+export async function loadMedicalRecordByPatientId(patientId: string) {
+  const patient = await assertPatientExists(patientId);
+  if (!patient) return null;
+
+  const [
+    allergies,
+    medicalHistories,
+    vaccinations,
+    chronicConditions,
+    familyHistories,
+    socialHistory,
+    emergencyContacts,
+    examResults,
+    medicalImages,
+    currentMedications,
+    surgeries,
+    admissions,
+    vitalSigns,
+  ] = await Promise.all([
+    db.patientAllergy.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
+    db.medicalHistory.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
+    db.vaccination.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
+    db.chronicCondition.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
+    db.familyHistory.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
+    db.socialHistory.findUnique({ where: { patientId } }),
+    db.patientEmergencyContact.findMany({
+      where: { patientId },
+      orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+    }),
+    db.examResult.findMany({ where: { patientId }, orderBy: { orderDate: "desc" } }),
+    db.medicalImage.findMany({ where: { patientId }, orderBy: { studyDate: "desc" } }),
+    db.currentMedication.findMany({ where: { patientId }, orderBy: { startDate: "desc" } }),
+    db.surgery.findMany({
+      where: { patientId },
+      include: {
+        hospital: true,
+        primarySurgeon: { include: { user: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    db.admission.findMany({
+      where: { patientId },
+      include: {
+        hospital: true,
+        admittingDoctor: { include: { user: true } },
+      },
+      orderBy: { admissionDate: "desc" },
+    }),
+    db.vitalSign.findMany({
+      where: { patientId },
+      orderBy: { recordedAt: "desc" },
+      take: 10,
+    }),
+  ]);
+
+  const chronicDiseaseNames = [
+    ...new Set([
+      ...chronicConditions.filter((c) => c.status === "ACTIVE").map((c) => c.condition),
+      ...medicalHistories.map((h) => h.condition),
+    ]),
+  ];
+
+  return {
+    id: `MR-${patient.id}`,
+    patientId: patient.id,
+    patient: {
+      id: patient.id,
+      firstName: patient.firstName,
+      lastName: patient.lastName,
+      fileNumber: patient.fileNumber,
+    },
+    createdAt: toIso(patient.createdAt),
+    updatedAt: toIso(patient.updatedAt),
+    medicalHistory: {
+      id: `MH-${patient.id}`,
+      patientId: patient.id,
+      chronicDiseases: chronicDiseaseNames,
+      surgicalHistory: surgeries.map(mapSurgery),
+      hospitalizations: admissions.map(mapAdmission),
+      medications: currentMedications.map(mapMedication),
+      createdAt: toIso(patient.createdAt),
+      updatedAt: toIso(patient.updatedAt),
+    },
+    allergies: allergies.map(mapAllergy),
+    examResults: examResults.map(mapExamResult),
+    medicalImages: medicalImages.map(mapMedicalImage),
+    vaccinations: vaccinations.map(mapVaccination),
+    chronicConditions: chronicConditions.map(mapChronicCondition),
+    familyHistory: familyHistories.map(mapFamilyHistory),
+    socialHistory: mapSocialHistory(socialHistory, patientId),
+    emergencyContacts: emergencyContacts.map(mapEmergencyContact),
+    vitalSigns: vitalSigns.map(mapVitalSign),
+  };
+}
+
 function mapAllergy(a: any) {
   return {
     id: a.id,
@@ -236,103 +335,37 @@ function mapMedication(m: any) {
   };
 }
 
+function mapVitalSign(v: any) {
+  return {
+    id: v.id,
+    recordedAt: toIso(v.recordedAt) || toIso(v.consultation?.date) || new Date().toISOString(),
+    temperature: v.temperature ?? null,
+    heartRate: v.fc ?? null,
+    bloodPressureSystolic: v.pas ?? null,
+    bloodPressureDiastolic: v.pad ?? null,
+    respirationRate: v.respirationRate ?? null,
+    weight: v.weight ?? null,
+    height: v.height ?? null,
+    spo2: v.spo2 ?? null,
+    imc: v.imc ?? null,
+    notes: v.notes || undefined,
+  };
+}
+
 /**
  * GET /patients/:patientId/medical-record
  * Aggregate DME shaped for the web MedicalRecord type.
+ * Public (P0.8): cartes QR. Mutations are JWT + hospitalId.
+ * Patient-facing UI is P2.2 (/patient-portal), not this public GET.
  */
 export async function getMedicalRecord(req: Request, res: Response) {
   const { patientId } = req.params;
 
   try {
-    const patient = await assertPatientExists(patientId);
-    if (!patient) {
+    const medicalRecord = await loadMedicalRecordByPatientId(patientId);
+    if (!medicalRecord) {
       return res.status(404).json({ data: null, error: "Patient not found" });
     }
-
-    const [
-      allergies,
-      medicalHistories,
-      vaccinations,
-      chronicConditions,
-      familyHistories,
-      socialHistory,
-      emergencyContacts,
-      examResults,
-      medicalImages,
-      currentMedications,
-      surgeries,
-      admissions,
-    ] = await Promise.all([
-      db.patientAllergy.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
-      db.medicalHistory.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
-      db.vaccination.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
-      db.chronicCondition.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
-      db.familyHistory.findMany({ where: { patientId }, orderBy: { createdAt: "desc" } }),
-      db.socialHistory.findUnique({ where: { patientId } }),
-      db.patientEmergencyContact.findMany({
-        where: { patientId },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
-      }),
-      db.examResult.findMany({ where: { patientId }, orderBy: { orderDate: "desc" } }),
-      db.medicalImage.findMany({ where: { patientId }, orderBy: { studyDate: "desc" } }),
-      db.currentMedication.findMany({ where: { patientId }, orderBy: { startDate: "desc" } }),
-      db.surgery.findMany({
-        where: { patientId },
-        include: {
-          hospital: true,
-          primarySurgeon: { include: { user: true } },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      db.admission.findMany({
-        where: { patientId },
-        include: {
-          hospital: true,
-          admittingDoctor: { include: { user: true } },
-        },
-        orderBy: { admissionDate: "desc" },
-      }),
-    ]);
-
-    // Access audit skipped here: PatientAccessLog requires authenticated userId
-
-    const chronicDiseaseNames = [
-      ...new Set([
-        ...chronicConditions.filter((c) => c.status === "ACTIVE").map((c) => c.condition),
-        ...medicalHistories.map((h) => h.condition),
-      ]),
-    ];
-
-    const medicalRecord = {
-      id: `MR-${patient.id}`,
-      patientId: patient.id,
-      patient: {
-        id: patient.id,
-        firstName: patient.firstName,
-        lastName: patient.lastName,
-        fileNumber: patient.fileNumber,
-      },
-      createdAt: toIso(patient.createdAt),
-      updatedAt: toIso(patient.updatedAt),
-      medicalHistory: {
-        id: `MH-${patient.id}`,
-        patientId: patient.id,
-        chronicDiseases: chronicDiseaseNames,
-        surgicalHistory: surgeries.map(mapSurgery),
-        hospitalizations: admissions.map(mapAdmission),
-        medications: currentMedications.map(mapMedication),
-        createdAt: toIso(patient.createdAt),
-        updatedAt: toIso(patient.updatedAt),
-      },
-      allergies: allergies.map(mapAllergy),
-      examResults: examResults.map(mapExamResult),
-      medicalImages: medicalImages.map(mapMedicalImage),
-      vaccinations: vaccinations.map(mapVaccination),
-      chronicConditions: chronicConditions.map(mapChronicCondition),
-      familyHistory: familyHistories.map(mapFamilyHistory),
-      socialHistory: mapSocialHistory(socialHistory, patientId),
-      emergencyContacts: emergencyContacts.map(mapEmergencyContact),
-    };
 
     return res.status(200).json({ data: medicalRecord, error: null });
   } catch (error) {

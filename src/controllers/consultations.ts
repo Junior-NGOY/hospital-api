@@ -1,6 +1,110 @@
 import { db } from "@/db/db";
 import { Request, Response } from "express";
 import { TypedRequestBody } from "@/types";
+import { AuthRequest } from "@/middleware/auth";
+import {
+  jsonError,
+  requirePatientInHospital,
+  resolveHospitalScope,
+} from "@/utils/hospitalScope";
+import { syncConsultationToDme, ConsultationDmePayload } from "@/utils/syncConsultationToDme";
+import { placeLabOrder, resolveDoctorUser } from "@/utils/labOrders";
+
+async function denyIfConsultationOutOfScope(
+  req: AuthRequest,
+  res: Response,
+  consultation: { hospitalId: string | null; patientId: string }
+): Promise<boolean> {
+  const { hospitalId } = await resolveHospitalScope(req);
+  if (!hospitalId) {
+    jsonError(res, 403, "Accès refusé");
+    return true;
+  }
+  if (consultation.hospitalId && consultation.hospitalId !== hospitalId) {
+    jsonError(res, 403, "Accès refusé");
+    return true;
+  }
+  const patient = await db.patient.findUnique({
+    where: { id: consultation.patientId },
+    select: { hospitalId: true },
+  });
+  if (!patient || patient.hospitalId !== hospitalId) {
+    jsonError(res, 403, "Accès refusé");
+    return true;
+  }
+  return false;
+}
+
+function toFloat(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  const n = typeof value === "number" ? value : parseFloat(String(value));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function toInt(value: unknown): number | undefined {
+  const n = toFloat(value);
+  return n === undefined ? undefined : Math.round(n);
+}
+
+async function resolveDoctorId(raw?: string | null): Promise<string | undefined> {
+  if (!raw) return undefined;
+  const asDoctor = await db.doctor.findUnique({
+    where: { id: raw },
+    select: { id: true },
+  });
+  if (asDoctor) return asDoctor.id;
+  const byUser = await db.doctor.findUnique({
+    where: { userId: raw },
+    select: { id: true },
+  });
+  return byUser?.id;
+}
+
+function extractPrescribedExams(data: CreateConsultationProps): Array<{
+  name: string;
+  category: string;
+  priority?: string;
+  instructions?: string;
+}> {
+  const para = data.paraclinicalExams as
+    | {
+        exams?: Array<{
+          name?: string;
+          category?: string;
+          priority?: string;
+          instructions?: string;
+        }>;
+        requestedExams?: Array<{
+          name?: string;
+          category?: string;
+          priority?: string;
+          instructions?: string;
+        }>;
+      }
+    | undefined;
+  const list = [...(para?.exams || []), ...(para?.requestedExams || [])];
+  const seen = new Set<string>();
+  const exams: Array<{
+    name: string;
+    category: string;
+    priority?: string;
+    instructions?: string;
+  }> = [];
+  for (const exam of list) {
+    if (!exam?.name) continue;
+    const name = String(exam.name).trim();
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    exams.push({
+      name,
+      category: String(exam.category || "OTHER"),
+      priority: exam.priority,
+      instructions: exam.instructions,
+    });
+  }
+  return exams;
+}
 
 // ==================== FONCTIONS POUR LES CONSULTATIONS ====================
 
@@ -103,7 +207,7 @@ export interface CreateConsultationProps {
     severity: string;
   };
   paraclinicalExams: {
-    requestedExams: Array<{
+    requestedExams?: Array<{
       id: string;
       name: string;
       prescriptionDate: string;
@@ -113,6 +217,14 @@ export interface CreateConsultationProps {
       priority: string;
       facility: string;
       instructions: string;
+    }>;
+    exams?: Array<{
+      id?: string;
+      name?: string;
+      category?: string;
+      status?: string;
+      priority?: string;
+      instructions?: string;
     }>;
     paraclinicalConclusion: string;
   };
@@ -173,110 +285,187 @@ export interface CreateConsultationProps {
 }
 
 /**
- * Crée une nouvelle consultation médicale
+ * Crée une nouvelle consultation médicale et alimente le DME (P0.4).
  */
 export async function createConsultation(
-  req: TypedRequestBody<CreateConsultationProps>,
+  req: AuthRequest & TypedRequestBody<CreateConsultationProps>,
   res: Response
 ) {
-   const data = req.body;
-   const patientId = data.selectedPatient.id;
-   const doctorId = data.doctorId;
-   const chiefComplaintId = data.currentIllness.chiefComplaint;
-   const {
-    appointmentId,
-    hospitalId,
-    branchId,
-    diagnosis,
-    notes,
-    followUpNeeded,
-    followUpDate,
-    consultationFee,
-    basePrice,
-    appliedPrice,
-    discountAmount,
-    subscriptionId
-  } = data;
+  const data = req.body;
 
   try {
-    // Vérifier si le patient existe
+    const patientId = data?.selectedPatient?.id;
+    if (!patientId) {
+      return res.status(400).json({
+        data: null,
+        error: "Un patient est requis pour enregistrer la consultation",
+      });
+    }
+
     const patient = await db.patient.findUnique({
-      where: { id: patientId }
+      where: { id: patientId },
     });
 
     if (!patient) {
       return res.status(404).json({
         data: null,
-        error: "Patient non trouvé"
+        error: "Patient non trouvé",
       });
     }
 
-    // Créer la consultation
+    const scoped = await requirePatientInHospital(req, res, patientId);
+    if (!scoped) return;
+
+    const doctorId = await resolveDoctorId(data.doctorId);
+    const hospitalId = scoped.hospitalId;
+    const branchId = scoped.branchId || patient.branchId || undefined;
+
+    let chiefComplaintId: string | undefined;
+    const rawComplaint = data.currentIllness?.chiefComplaint;
+    if (rawComplaint) {
+      const found = await db.chiefComplaint.findUnique({
+        where: { id: rawComplaint },
+        select: { id: true },
+      });
+      if (found) chiefComplaintId = found.id;
+    }
+
+    const diagnosis = data.diagnosis
+      ? typeof data.diagnosis === "object"
+        ? JSON.parse(JSON.stringify(data.diagnosis))
+        : data.diagnosis
+      : undefined;
+
+    const symptoms =
+      data.symptoms ||
+      [
+        data.currentIllness?.chiefComplaint,
+        data.currentIllness?.hma,
+        (data.currentIllness as { illnessDescription?: string } | undefined)?.illnessDescription,
+        (data.currentIllness as { symptoms?: string } | undefined)?.symptoms,
+      ]
+        .filter(Boolean)
+        .join("\n") || undefined;
+
     const newConsultation = await db.consultation.create({
       data: {
         patientId,
-        doctorId: doctorId!,
-        appointmentId,
+        doctorId,
+        appointmentId: data.appointmentId,
         hospitalId,
         branchId,
         chiefComplaintId,
-        diagnosis: diagnosis ? (typeof diagnosis === 'object' ? JSON.parse(JSON.stringify(diagnosis)) : diagnosis) : undefined,
-        notes,
-        followUpNeeded: followUpNeeded || false,
-        followUpDate: followUpDate ? new Date(followUpDate) : undefined,
-        consultationFee,
-        basePrice,
-        appliedPrice,
-        discountAmount,
-        subscriptionId
+        diagnosis,
+        symptoms,
+        notes: data.notes,
+        followUpNeeded: data.followUpNeeded || false,
+        followUpDate: data.followUpDate ? new Date(data.followUpDate) : undefined,
+        consultationFee: data.consultationFee,
+        basePrice: data.basePrice,
+        appliedPrice: data.appliedPrice,
+        discountAmount: data.discountAmount,
+        subscriptionId: data.subscriptionId,
       },
-    });    // Créer les signes vitaux liés à la consultation si fournis
+    });
+
     if (data.vitalSigns) {
-      // Vérifier si le staffId correspond à un infirmier valide
-      let validNurseId = null;
+      let validNurseId: string | null = null;
       if (data.vitalSigns.staffId) {
         const nurse = await db.nurse.findUnique({
-          where: { id: data.vitalSigns.staffId }
+          where: { id: data.vitalSigns.staffId },
         });
-        if (nurse) {
-          validNurseId = nurse.id;
-        }
+        if (nurse) validNurseId = nurse.id;
       }
 
-      await db.vitalSign.create({
-        data: {
-          patientId,
-          nurseId: validNurseId,
-          consultationId: newConsultation.id,
-          temperature: parseFloat(data.vitalSigns.temperature),
-          respirationRate: parseFloat(data.vitalSigns.respirationRate),
-          height: parseFloat(data.vitalSigns.height),
-          weight: parseFloat(data.vitalSigns.weight),
-          pa: parseFloat(data.vitalSigns.pa),
-          ta: data.vitalSigns.ta,
-          ddr: data.vitalSigns.ddr,
-          dpa: data.vitalSigns.dpa,
-          pc: parseFloat(data.vitalSigns.pc),
-          imc: parseFloat(data.vitalSigns.imc),
-          pas: parseFloat(data.vitalSigns.pas),
-          pad: parseFloat(data.vitalSigns.pad),
-          fc: parseFloat(data.vitalSigns.fc),
-          spo2: parseFloat(data.vitalSigns.spo2),
-          notes: data.vitalSigns.notes,
-          recordedAt: data.vitalSigns.recordedAt ? new Date(data.vitalSigns.recordedAt) : new Date()
+      const vs = data.vitalSigns as typeof data.vitalSigns & {
+        bloodPressureSystolic?: string;
+        bloodPressureDiastolic?: string;
+        heartRate?: string;
+        oxygenSaturation?: string;
+        respiratoryRate?: string;
+        bmi?: string;
+      };
+      const pas = vs.pas || vs.bloodPressureSystolic;
+      const pad = vs.pad || vs.bloodPressureDiastolic;
+      const fc = vs.fc || vs.heartRate;
+      const spo2 = vs.spo2 || vs.oxygenSaturation;
+      const respirationRate = vs.respirationRate || vs.respiratoryRate;
+      const imc = vs.imc || vs.bmi;
+
+      const hasAnyVital =
+        toFloat(vs.temperature) !== undefined ||
+        toInt(respirationRate) !== undefined ||
+        toFloat(vs.height) !== undefined ||
+        toFloat(vs.weight) !== undefined ||
+        toFloat(pas) !== undefined ||
+        toFloat(pad) !== undefined ||
+        toFloat(fc) !== undefined ||
+        toFloat(spo2) !== undefined ||
+        Boolean(vs.ta) ||
+        Boolean(vs.notes);
+
+      if (hasAnyVital) {
+        await db.vitalSign.create({
+          data: {
+            patientId,
+            nurseId: validNurseId,
+            consultationId: newConsultation.id,
+            temperature: toFloat(vs.temperature),
+            respirationRate: toInt(respirationRate),
+            height: toFloat(vs.height),
+            weight: toFloat(vs.weight),
+            pa: toFloat(vs.pa),
+            ta: vs.ta || undefined,
+            ddr: vs.ddr || undefined,
+            dpa: vs.dpa || undefined,
+            pc: toFloat(vs.pc),
+            imc: toFloat(imc),
+            pas: toFloat(pas),
+            pad: toFloat(pad),
+            fc: toFloat(fc),
+            spo2: toFloat(spo2),
+            notes: vs.notes || undefined,
+            recordedAt: vs.recordedAt ? new Date(vs.recordedAt) : new Date(),
+          },
+        });
+      }
+    }
+
+    await syncConsultationToDme(patientId, data as ConsultationDmePayload, doctorId);
+
+    const prescribedExams = extractPrescribedExams(data);
+    if (prescribedExams.length > 0) {
+      try {
+        const doctorInfo = await resolveDoctorUser(doctorId);
+        for (const exam of prescribedExams) {
+          await placeLabOrder({
+            hospitalId,
+            patientId,
+            consultationId: newConsultation.id,
+            doctorUserId: doctorInfo.userId,
+            doctorProfileId: doctorInfo.profileId || doctorId || null,
+            testName: exam.name,
+            testType: exam.category,
+            urgency: exam.priority,
+            notes: exam.instructions || null,
+            instructions: exam.instructions || null,
+            orderedByName: doctorInfo.name || "Médecin",
+          });
         }
-      });
+      } catch (labError) {
+        console.error("lab orders from consultation", labError);
+      }
     }
 
     return res.status(201).json({
       data: newConsultation,
-      error: null
+      error: null,
     });
   } catch (error) {
     console.log(error);
     return res.status(500).json({
       data: null,
-      error: "Une erreur est survenue lors de la création de la consultation"
+      error: "Une erreur est survenue lors de la création de la consultation",
     });
   }
 }
@@ -284,11 +473,10 @@ export async function createConsultation(
 /**
  * Récupère toutes les consultations avec filtres optionnels
  */
-export async function getConsultations(req: Request, res: Response) {
+export async function getConsultations(req: AuthRequest, res: Response) {
   const { 
     patientId, 
     doctorId, 
-    hospitalId, 
     branchId, 
     startDate, 
     endDate, 
@@ -298,8 +486,30 @@ export async function getConsultations(req: Request, res: Response) {
   } = req.query;
 
   try {
-    // Construire les conditions de recherche
-    const where: any = {};
+    const { hospitalId } = await resolveHospitalScope(req);
+    const pageNumber = parseInt(page as string) || 1;
+    const limitNumber = parseInt(limit as string) || 20;
+
+    if (!hospitalId) {
+      return res.status(200).json({
+        data: {
+          consultations: [],
+          pagination: {
+            total: 0,
+            page: pageNumber,
+            limit: limitNumber,
+            totalPages: 0,
+            hasNextPage: false,
+            hasPrevPage: false,
+          },
+        },
+        error: null,
+      });
+    }
+
+    const where: any = {
+      OR: [{ hospitalId }, { patient: { hospitalId } }],
+    };
     
     if (patientId) {
       where.patientId = patientId as string;
@@ -307,10 +517,6 @@ export async function getConsultations(req: Request, res: Response) {
     
     if (doctorId) {
       where.doctorId = doctorId as string;
-    }
-    
-    if (hospitalId) {
-      where.hospitalId = hospitalId as string;
     }
     
     if (branchId) {
@@ -336,9 +542,6 @@ export async function getConsultations(req: Request, res: Response) {
       where.isPaid = isPaid === "true";
     }
 
-    // Pagination
-    const pageNumber = parseInt(page as string) || 1;
-    const limitNumber = parseInt(limit as string) || 20;
     const skip = (pageNumber - 1) * limitNumber;
 
     // Récupérer les consultations avec pagination
@@ -430,7 +633,7 @@ export async function getConsultations(req: Request, res: Response) {
 /**
  * Récupère une consultation par son ID
  */
-export async function getConsultationById(req: Request, res: Response) {
+export async function getConsultationById(req: AuthRequest, res: Response) {
   const { id } = req.params;
 
   try {
@@ -507,6 +710,10 @@ export async function getConsultationById(req: Request, res: Response) {
       });
     }
 
+    if (await denyIfConsultationOutOfScope(req, res, consultation)) {
+      return;
+    }
+
     return res.status(200).json({
       data: consultation,
       error: null
@@ -523,7 +730,7 @@ export async function getConsultationById(req: Request, res: Response) {
 /**
  * Met à jour une consultation
  */
-export async function updateConsultation(req: Request, res: Response) {
+export async function updateConsultation(req: AuthRequest, res: Response) {
   const { id } = req.params;
   const {
     chiefComplaint,
@@ -552,7 +759,10 @@ export async function updateConsultation(req: Request, res: Response) {
       });
     }
 
-    // Mettre à jour la consultation
+    if (await denyIfConsultationOutOfScope(req, res, consultation)) {
+      return;
+    }
+
     const updatedConsultation = await db.consultation.update({
       where: { id },
       data: {
@@ -605,7 +815,7 @@ export async function updateConsultation(req: Request, res: Response) {
 /**
  * Supprime une consultation
  */
-export async function deleteConsultation(req: Request, res: Response) {
+export async function deleteConsultation(req: AuthRequest, res: Response) {
   const { id } = req.params;
 
   try {
@@ -636,6 +846,10 @@ export async function deleteConsultation(req: Request, res: Response) {
         data: null,
         error: "Consultation non trouvée"
       });
+    }
+
+    if (await denyIfConsultationOutOfScope(req, res, consultation)) {
+      return;
     }
 
     // Vérifier s'il y a des entités liées
